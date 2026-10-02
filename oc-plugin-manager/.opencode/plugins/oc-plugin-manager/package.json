@@ -1,0 +1,28 @@
+{
+  "name": "oc-plugin-manager",
+  "version": "0.1.0",
+  "description": "OpenCode plugin manager: enable/disable plugins from the desktop settings panel (Extensions -> Plugins), TUI and tools. Independent, reversible, no host patches.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./rpc": "./src/rpc.ts",
+    "./tui": "./src/tui.tsx",
+    "./package.json": "./package.json"
+  },
+  "files": ["src", "index.ts", "tui.tsx"],
+  "keywords": ["opencode", "opencode-plugin", "plugin-manager", "enable", "disable"],
+  "license": "MIT",
+  "engines": { "opencode": ">=2.0.0" },
+  "devDependencies": { "@opencode/plugin": "^2.0.22" },
+  "peerDependencies": {
+    "@opentui/core": ">=0.5.14",
+    "@opentui/solid": ">=0.5.14",
+    "solid-js": ">=1.9.0"
+  },
+  "peerDependenciesMeta": {
+    "@opentui/core": { "optional": true },
+    "@opentui/solid": { "optional": true },
+    "solid-js": { "optional": true }
+  }
+}

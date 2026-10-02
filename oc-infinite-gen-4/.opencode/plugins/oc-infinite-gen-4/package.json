@@ -1,0 +1,48 @@
+{
+  "name": "oc-infinite-gen-4",
+  "version": "0.4.1",
+  "description": "OpenCode V2 port of dsh-infinite-gen-4 v0.4.0 — dual-layer system prompt injection (Order 100/200), armor refusal projection and TUI status badge.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./rpc": "./src/rpc.ts",
+    "./tui": "./src/tui.tsx",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src",
+    "prompts",
+    "index.ts"
+  ],
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "infinite-gen-4",
+    "dsh-infinite-gen-4",
+    "red-team"
+  ],
+  "license": "CC-BY-NC-SA-4.0",
+  "engines": {
+    "opencode": ">=2.0.0"
+  },
+  "devDependencies": {
+    "@opencode/plugin": "^2.0.22"
+  },
+  "peerDependencies": {
+    "@opentui/core": ">=0.5.14",
+    "@opentui/solid": ">=0.5.14",
+    "solid-js": ">=1.9.0"
+  },
+  "peerDependenciesMeta": {
+    "@opentui/core": {
+      "optional": true
+    },
+    "@opentui/solid": {
+      "optional": true
+    },
+    "solid-js": {
+      "optional": true
+    }
+  }
+}

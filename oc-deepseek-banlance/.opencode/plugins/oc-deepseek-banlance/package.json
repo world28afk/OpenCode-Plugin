@@ -1,0 +1,48 @@
+{
+  "name": "oc-deepseek-banlance",
+  "version": "0.2.1",
+  "description": "DeepSeek API balance for OpenCode: server tool + RPC + TUI status/panel + desktop UI bridge (context circle tooltip & context page).",
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./rpc": "./src/rpc.ts",
+    "./tui": "./src/tui.tsx",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src",
+    "index.ts",
+    "tui.tsx"
+  ],
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "deepseek",
+    "balance",
+    "余额"
+  ],
+  "license": "MIT",
+  "engines": {
+    "opencode": ">=2.0.0"
+  },
+  "devDependencies": {
+    "@opencode/plugin": "^2.0.22"
+  },
+  "peerDependencies": {
+    "@opentui/core": ">=0.5.14",
+    "@opentui/solid": ">=0.5.14",
+    "solid-js": ">=1.9.0"
+  },
+  "peerDependenciesMeta": {
+    "@opentui/core": {
+      "optional": true
+    },
+    "@opentui/solid": {
+      "optional": true
+    },
+    "solid-js": {
+      "optional": true
+    }
+  }
+}

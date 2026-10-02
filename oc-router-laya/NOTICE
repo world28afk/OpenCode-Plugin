@@ -1,0 +1,17 @@
+oc-router-laya
+Copyright 2026 world28afk
+
+This project is an independent OpenCode adaptation inspired by:
+
+  * dsh-router-laya -- https://github.com/HapyRain/dsh-router-laya (Apache-2.0)
+      The four-layer tier-routing design (dictionary intents, judge, regenerate
+      escalation, constraint filtering), the seven-question protocol and the
+      weighting rules are re-implemented here for the OpenCode plugin API.
+
+  * convaiinnovations/laya -- https://huggingface.co/convaiinnovations/laya (Apache-2.0)
+  * answerdotai/ModernBERT-large -- https://huggingface.co/answerdotai/ModernBERT-large (Apache-2.0)
+      Upstream judge model lineage referenced for context. This repository ships
+      no model weights; the heuristic judge is an original deterministic
+      implementation.
+
+No upstream source code is vendored; only behavioral design is referenced.
