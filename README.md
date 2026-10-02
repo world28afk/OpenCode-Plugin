@@ -1,18 +1,20 @@
 # OpenCode Plugin Workspace
 
-统一管理在本机开发的全部 OpenCode 插件（源码仓库 + 桌面注入 + 安装脚本）。
+统一管理在本机开发的全部 OpenCode 插件 —— **单一公开仓库**：https://github.com/world28afk/OpenCode-Plugin
 
-## 插件仓库
+（原先按插件拆分的多个子库已合并到本库；源码目录结构保持不变。）
 
-| 仓库 | 说明 | 类型 | GitHub |
-| :--- | :--- | :--- | :--- |
-| `oc-infinite-gen-4` | 无限四代内核移植 + 桌面徽章 | 服务端 + 桌面注入 | world28afk/oc-infinite-gen-4 |
-| `oc-deepseek-banlance` | DeepSeek 余额（上下文圈 + 审查页） | 服务端 + 桌面注入 | world28afk/oc-deepseek-banlance |
-| `oc-plugin-manager` | 插件管理器（设置页原生开关启用/禁用） | 服务端 + 桌面注入 | world28afk/oc-plugin-manager |
-| `oc-perf-guard` | 性能守卫（脚本资源治理：Laya 式规则判定 → 自动降优先级/宽限终止/保留；含 MCP 进程归因清理） | 服务端 + TUI | world28afk/oc-perf-guard |
-| `oc-workflow` | Workflow（capsule/并行子代理/运行图/续跑） | 服务端 + TUI | world28afk/oc-workflow |
-| `oc-router-laya` | 档位路由（Laya 四层管线, 多模型档位表） | 服务端 + TUI | world28afk/oc-router-laya |
-| `oc-plugin` | OpenCode 插件开发与迁移文档 | 文档 | world28afk/oc-plugin |
+## 插件目录
+
+| 目录 | 说明 | 类型 |
+| :--- | :--- | :--- |
+| `oc-infinite-gen-4` | 无限四代内核移植 + 桌面徽章 | 服务端 + 桌面注入 |
+| `oc-deepseek-banlance` | DeepSeek 余额（上下文圈 + 审查页） | 服务端 + 桌面注入 |
+| `oc-plugin-manager` | 插件管理器（设置页原生开关启用/禁用） | 服务端 + 桌面注入 |
+| `oc-perf-guard` | 性能守卫（Laya 式脚本资源治理 → 自动降优先级/宽限终止/保留；含 MCP 进程归因清理） | 服务端 + TUI |
+| `oc-workflow` | Workflow（capsule/并行子代理/运行图/缓存续跑） | 服务端 + TUI |
+| `oc-router-laya` | 档位路由（Laya 四层管线, 多模型档位表） | 服务端 + TUI |
+| `oc-plugin` | OpenCode 插件开发与迁移文档 | 文档 |
 
 ## 常用操作
 
