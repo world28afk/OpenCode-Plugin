@@ -3,7 +3,7 @@
 //   bun test scripts/smoke.test.ts
 
 import { describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -78,6 +78,9 @@ describe("directory scanning + toggling", () => {
     const ws = makeWorkspace()
     const root = join(ws.project, ".opencode", "plugins")
     mkdirSync(join(root, "oc-a"))
+    mkdirSync(join(root, "oc-c"))
+    writeFileSync(join(root, "oc-c", "package.json"), "{}\n")
+    writeFileSync(join(root, "oc-c", ".oc-plugin-manager.disabled.json"), '{"disabledAt":1,"renamed":["package.json"]}\n')
     mkdirSync(join(root, "oc-b.disabled"))
     writeFileSync(join(root, "x.ts"), "export default {}\n")
     writeFileSync(join(root, "y.ts.disabled"), "export default {}\n")
@@ -87,6 +90,7 @@ describe("directory scanning + toggling", () => {
     const byName = Object.fromEntries(entries.map((e) => [e.name, e]))
     expect(byName["oc-a"]!.enabled).toBe(true)
     expect(byName["oc-b"]!.enabled).toBe(false)
+    expect(byName["oc-c"]!.enabled).toBe(false) // 入口中和标记 → 禁用
     expect(byName["x.ts"]!.kind).toBe("file")
     expect(byName["y.ts"]!.enabled).toBe(false)
     expect(byName["oc-plugin-manager"]!.manageable).toBe(false)
@@ -94,19 +98,30 @@ describe("directory scanning + toggling", () => {
     rmSync(ws.root, { recursive: true, force: true })
   })
 
-  test("setEnabled renames dir/file and refuses self", () => {
+  test("setEnabled neutralizes dir entry / renames file and refuses self", () => {
     const ws = makeWorkspace()
     const root = join(ws.project, ".opencode", "plugins")
     mkdirSync(join(root, "oc-a"))
-    writeFileSync(join(root, "oc-b"), "") // placeholder to create dir later
+    writeFileSync(join(root, "oc-a", "package.json"), '{"name":"oc-a"}\n')
+    writeFileSync(join(root, "oc-a", "index.ts"), "export default {}\n")
 
     const disable = setEnabled(ws.options, { name: "oc-a", scope: "project", enabled: false })
     expect(disable.ok).toBe(true)
+    expect(existsSync(join(root, "oc-a", "package.json.disabled"))).toBe(true)
+    expect(existsSync(join(root, "oc-a", "index.ts.disabled"))).toBe(true)
+    expect(existsSync(join(root, "oc-a", "package.json"))).toBe(false)
     expect(listAll(ws.options).entries.find((e) => e.name === "oc-a")!.enabled).toBe(false)
 
     const enable = setEnabled(ws.options, { name: "oc-a", scope: "project", enabled: true })
     expect(enable.ok).toBe(true)
+    expect(existsSync(join(root, "oc-a", "package.json"))).toBe(true)
+    expect(existsSync(join(root, "oc-a", "index.ts"))).toBe(true)
     expect(listAll(ws.options).entries.find((e) => e.name === "oc-a")!.enabled).toBe(true)
+
+    // 文件型插件仍按扩展名改名
+    writeFileSync(join(root, "z.ts"), "export default {}\n")
+    expect(setEnabled(ws.options, { name: "z.ts", scope: "project", enabled: false }).ok).toBe(true)
+    expect(existsSync(join(root, "z.ts.disabled"))).toBe(true)
 
     mkdirSync(join(root, "oc-plugin-manager"))
     const refuse = setEnabled(ws.options, { name: "oc-plugin-manager", scope: "project", enabled: false })
@@ -120,8 +135,10 @@ describe("directory scanning + toggling", () => {
 
   test("scopes stay independent (project vs global same name)", () => {
     const ws = makeWorkspace()
-    mkdirSync(join(ws.project, ".opencode", "plugins", "dup"))
-    mkdirSync(join(ws.configHome, "opencode", "plugins", "dup"), { recursive: true })
+    for (const dir of [join(ws.project, ".opencode", "plugins", "dup"), join(ws.configHome, "opencode", "plugins", "dup")]) {
+      mkdirSync(dir, { recursive: true })
+      writeFileSync(join(dir, "package.json"), "{}\n")
+    }
 
     const all = listAll(ws.options).entries.filter((e) => e.name === "dup")
     expect(all).toHaveLength(2)
@@ -170,6 +187,7 @@ describe("mount (fake host)", () => {
   test("registers tools + rpc and toggles a plugin", async () => {
     const ws = makeWorkspace()
     mkdirSync(join(ws.project, ".opencode", "plugins", "demo"))
+    writeFileSync(join(ws.project, ".opencode", "plugins", "demo", "package.json"), "{}\n")
     const harness = makeContext(ws.options)
     const cleanup = await mount(harness.ctx)
 

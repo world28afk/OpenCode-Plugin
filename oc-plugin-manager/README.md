@@ -11,7 +11,7 @@
 
 | 插件类型 | 位置 | 禁用方式 |
 | :--- | :--- | :--- |
-| 目录型 | `<项目>/.opencode/plugins/<name>/` 或 `~/.config/opencode/plugins/<name>/` | 目录重命名为 `<name>.disabled`（发现逻辑自动忽略） |
+| 目录型 | `<项目>/.opencode/plugins/<name>/` 或 `~/.config/opencode/plugins/<name>/` | **入口中和**：把 `package.json`/`index.*` 改名为 `*.disabled` 并写入标记，使该目录解析不到入口而不被激活（可逆） |
 | 文件型 | 同上目录下的 `*.ts / *.js` | 重命名为 `<file>.disabled` |
 | 配置型 | `opencode.json(c)` 的 `plugins` 数组字符串条目 | 在数组尾部追加 `-<id>` 标记（保留原条目与注释，启用时移除标记） |
 
@@ -89,6 +89,7 @@ oc-plugin-manager/
 
 ## 已知边界
 
-- 正在运行的插件模块在重命名后会随热加载卸载；若宿主未触发重载，重启服务即可。
+- **目录型插件不能靠目录改名禁用。** OpenCode 2.0.x 的插件发现（`PluginSourceDirectory.discover`）会加载 `{plugin,plugins}/` 下的**每一个目录**，与目录名无关 —— `<name>.disabled` 目录同样会被加载；且运行中的服务端对插件目录持有打开句柄，Windows 上 `fs.rename` 该目录必然 `EPERM`。因此本插件改用**入口中和**（改名 `package.json`/`index.*` 为 `*.disabled` + 写标记），服务端文件监视会即时热卸载，启用时精确还原。
+- 入口中和后目录本身仍在发现路径内，但解析不到入口 → 不会激活；这是可逆操作，标记文件为 `.oc-plugin-manager.disabled.json`。
 - 配置型条目仅支持字符串形式切换；对象条目请在配置文件中手动管理。
 - 桌面端自动更新会覆盖 app.asar，升级后重新执行注入即可。
