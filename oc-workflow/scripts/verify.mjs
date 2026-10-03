@@ -77,10 +77,15 @@ check("mount registers RPC", mount.includes("ctx.rpc.register"))
 check("save action available", mount.includes('case "save"'))
 check("mount injects context policy + prompt dispatch", mount.includes('hook("context"') && mount.includes('hook("prompt"'))
 check("mount supports /workflow auto", mount.includes('case "auto"'))
+check("mount uses native subagent for dispatch", mount.includes("createToolSubagentBridge") && mount.includes("nativeSubagent"))
 
 const auto = readFileSync(join(pluginRoot, "src", "auto.ts"), "utf8")
 check("auto heuristic + policy", auto.includes("detectHeavy") && auto.includes("policyText"))
 check("auto config file name", auto.includes("workflow-auto.json"))
+check("auto execution modes", auto.includes('"background"') && auto.includes('"workflow"'))
+
+const agents = readFileSync(join(pluginRoot, "src", "agents.ts"), "utf8")
+check("native subagent bridge", agents.includes("createToolSubagentBridge") && agents.includes("background"))
 
 const engine = readFileSync(join(pluginRoot, "src", "engine.ts"), "utf8")
 check("engine pause/resume/stop", engine.includes("pause(") && engine.includes("resume(") && engine.includes("stop("))

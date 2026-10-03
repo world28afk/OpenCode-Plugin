@@ -9,8 +9,8 @@ import { mkdirSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import type { Plugin } from "@opencode/plugin"
-import { createSessionBridge, type SessionDomainLike } from "./agents"
-import { detectHeavy, loadAutoConfig, persistAutoMode, policyText, type AutoConfig, type AutoMode } from "./auto"
+import { createSessionBridge, createToolSubagentBridge, extractToolSessionID, type SessionDomainLike, type ToolExecuteLike } from "./agents"
+import { backgroundPrompt, detectHeavy, loadAutoConfig, persistAutoMode, policyText, type AutoConfig, type AutoMode } from "./auto"
 import { validateCapsule, type Capsule } from "./capsule"
 import { findEntry, loadCatalog, type Catalog } from "./catalog"
 import { summarizeRun, WorkflowEngine, type BridgeFactory } from "./engine"
@@ -65,26 +65,53 @@ export function createMount(deps: WorkflowDeps = {}) {
       // agent 列表不可用时 readOnly 任务退回默认 agent
     }
 
+    // 原生 subagent 工具（OpenCode 后台任务）: 可用时优先承载 workflow 任务,
+    // 由宿主托管为可审计的 subagent（不进项目会话窗口）。
+    const nativeSubagent = await (async (): Promise<ToolExecuteLike | null> => {
+      try {
+        const toolDomain = ctx.tool as unknown as { list?: (input: Record<string, unknown>) => Promise<unknown> }
+        if (typeof toolDomain?.list !== "function") return null
+        const list = await toolDomain.list({})
+        const items = Array.isArray(list) ? list : ((list as { data?: unknown[] })?.data ?? [])
+        const found = (items as Array<{ name?: string; execute?: unknown }>).find((item) => item?.name === "subagent" && typeof item.execute === "function")
+        return found ? (found as unknown as ToolExecuteLike) : null
+      } catch {
+        return null
+      }
+    })()
+
     // 记录 workflow 自己创建的子会话, 用于阻止递归派发（子会话不再触发自动 workflow）。
     const childSessions = new Set<string>()
-    const rawBridgeFactory: BridgeFactory = ({ parentSessionID }) =>
-      createSessionBridge({
-        session: ctx.session as unknown as SessionDomainLike,
-        directory,
-        parentSessionID,
-        readOnlyAgent: knownAgents.includes("explore") ? "explore" : undefined,
-        knownAgents,
-        log,
-      })
+    const wrapBridge = (inner: SessionBridge): SessionBridge => ({
+      async spawn(task) {
+        const handle = await inner.spawn(task)
+        if (handle.sessionID && handle.sessionID.startsWith("ses")) childSessions.add(handle.sessionID)
+        return handle
+      },
+    })
     const bridgeFactory: BridgeFactory = ({ parentSessionID }) => {
-      const inner = rawBridgeFactory({ parentSessionID })
-      return {
-        async spawn(task) {
-          const handle = await inner.spawn(task)
-          if (handle.sessionID) childSessions.add(handle.sessionID)
-          return handle
-        },
+      if (nativeSubagent) {
+        return wrapBridge(
+          createToolSubagentBridge({
+            tool: nativeSubagent,
+            parentSessionID,
+            defaultAgent: "general",
+            readOnlyAgent: knownAgents.includes("explore") ? "explore" : undefined,
+            background: false,
+            log,
+          }),
+        )
       }
+      return wrapBridge(
+        createSessionBridge({
+          session: ctx.session as unknown as SessionDomainLike,
+          directory,
+          parentSessionID,
+          readOnlyAgent: knownAgents.includes("explore") ? "explore" : undefined,
+          knownAgents,
+          log,
+        }),
+      )
     }
 
     const notify = async (sessionID: string, text: string) => {
@@ -156,7 +183,7 @@ export function createMount(deps: WorkflowDeps = {}) {
                     workflows: catalog.entries.map((entry) => ({ name: entry.name, source: entry.source, description: entry.description, inputs: entry.capsule.inputs ?? {} })),
                     errors: catalog.errors,
                     recentRuns: store.list(10).map(summarizeRun),
-                    auto: { enabled: auto.enabled, mode: auto.mode, threshold: auto.threshold, workflow: auto.workflow, categories: auto.categories },
+                    auto: { enabled: auto.enabled, mode: auto.mode, threshold: auto.threshold, workflow: auto.workflow, categories: auto.categories, execution: auto.execution, agent: auto.agent },
                   },
                   null,
                   2,
@@ -371,6 +398,7 @@ export function createMount(deps: WorkflowDeps = {}) {
                         sessionID,
                         [
                           `自动派发: mode=${cfg.mode}（enabled=${cfg.enabled}, 注入策略=${cfg.injectPolicy}）`,
+                          `执行方式=${cfg.execution}（background=OpenCode 后台任务 | workflow=oc-workflow 引擎）  agent=${cfg.agent}`,
                           `阈值=${cfg.threshold}  触发 workflow=${cfg.workflow}  冷却=${cfg.cooldownMs}ms  每会话上限=${cfg.maxPerSession}`,
                           `类别: ${cfg.categories.join(", ")}`,
                           `配置来源: ${cfg.sources.length ? cfg.sources.join(" | ") : "(默认)"}`,
@@ -480,13 +508,47 @@ export function createMount(deps: WorkflowDeps = {}) {
                   return
                 }
                 sessionAuto.set(sessionID, { count: stat.count + 1, lastAt: Date.now() })
+                const label = detection.categories.join("/") || "heavy"
+
+                // 默认: 作为 OpenCode 后台任务（原生 subagent, 不阻塞、不新开项目窗口）。
+                if (config.execution === "background" && nativeSubagent) {
+                  const controller = new AbortController()
+                  const stamp = Date.now()
+                  const result = await nativeSubagent.execute(
+                    {
+                      description: `自动调查 · ${entry.name}`,
+                      prompt: backgroundPrompt(text, entry.capsule.intent ?? entry.capsule.description),
+                      agent: config.agent,
+                      background: true,
+                    },
+                    {
+                      signal: controller.signal,
+                      sessionID,
+                      agent: config.agent,
+                      messageID: `auto_${stamp}`,
+                      callID: `auto_${stamp}`,
+                      progress: async () => {},
+                      abort: () => controller.abort(),
+                    },
+                  )
+                  const child = extractToolSessionID(result)
+                  if (child) childSessions.add(child)
+                  log(`auto-dispatch(bg) ${entry.name} → subagent ${child ?? "?"} session=${sessionID} score=${detection.score} [${detection.signals.join(",")}]`)
+                  await notify(
+                    sessionID,
+                    `[oc-workflow] 检测到重任务（${label}, score=${detection.score}），已作为后台任务派发子代理调查${child ? `（子会话 ${child}）` : ""}。完成后由 OpenCode 通知回本会话，可点开子会话审计；/workflow auto off 可关闭。`,
+                  )
+                  return
+                }
+
+                // 可选: 走 oc-workflow 引擎（并行 + 汇总 + 落盘 + 缓存续跑）。
                 const record = await engine.start(entry.capsule, {
                   inputs: { [config.inputField]: text, question: text },
                   parentSessionID: sessionID,
                   wait: false,
                 })
                 autoRuns.set(record.id, { sessionID, name: entry.name, injected: false })
-                log(`auto-dispatch ${entry.name} runId=${record.id} session=${sessionID} score=${detection.score} [${detection.signals.join(",")}]`)
+                log(`auto-dispatch(workflow) ${entry.name} runId=${record.id} session=${sessionID} score=${detection.score} [${detection.signals.join(",")}]`)
                 await notify(
                   sessionID,
                   `[oc-workflow] 检测到重任务（${detection.categories.join("/") || "heavy"}, score=${detection.score}），已自动派发 ${entry.name}（runId=${record.id}）。完成后结果会回注本会话；/workflow auto off 可关闭。`,

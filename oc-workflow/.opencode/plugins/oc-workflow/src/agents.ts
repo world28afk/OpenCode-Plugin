@@ -142,3 +142,95 @@ function collectText(node: unknown, out: string[], depth: number): void {
     if (key in record) collectText(record[key], out, depth + 1)
   }
 }
+
+// ── 原生 subagent 工具桥接 ───────────────────────────────────────────────────
+//
+// OpenCode 内置 `subagent` 工具（经 ctx.tool.list() 暴露, 含 execute）:
+//   input: { agent, description, prompt, model?, sessionID?, background? }
+//   - background:true → 原生「后台任务」: 立即返回, 完成后由 OpenCode 通知父会话
+//   - background:false → 前台: 阻塞到结束并返回最终回复（仍创建可审计的子会话）
+// 相比裸 session.create, 由宿主托管, 桌面端作为 subagent 展示（不新开项目窗口）。
+
+export interface ToolExecuteLike {
+  execute: (input: Record<string, unknown>, context: Record<string, unknown>) => Promise<unknown>
+}
+
+export interface ToolBridgeOptions {
+  readonly tool: ToolExecuteLike
+  readonly parentSessionID?: string
+  readonly defaultAgent?: string
+  readonly readOnlyAgent?: string
+  readonly background?: boolean
+  readonly log?: (message: string) => void
+}
+
+/** 从原生 subagent 工具返回里尽力提取会话 id。 */
+export function extractToolSessionID(result: unknown): string | null {
+  if (!result || typeof result !== "object") return null
+  const record = result as Record<string, unknown>
+  const candidates = [record.sessionID, record.sessionId, record.id, (record.metadata as Record<string, unknown> | undefined)?.sessionID, (record.data as Record<string, unknown> | undefined)?.sessionID]
+  for (const value of candidates) if (typeof value === "string" && value.startsWith("ses")) return value
+  return null
+}
+
+/** 从原生 subagent 工具返回里尽力提取文本输出。 */
+export function extractToolText(result: unknown): string | null {
+  if (typeof result === "string") return result.trim() || null
+  if (!result || typeof result !== "object") return null
+  const record = result as Record<string, unknown>
+  if (typeof record.text === "string" && record.text.trim()) return record.text
+  if (typeof record.output === "string" && record.output.trim()) return record.output
+  const texts: string[] = []
+  for (const key of ["content", "parts", "children", "data"]) {
+    if (key in record) collectText(record[key], texts, 0)
+  }
+  const joined = texts.join("\n").trim()
+  return joined || null
+}
+
+export function createToolSubagentBridge(options: ToolBridgeOptions): SessionBridge {
+  const log = options.log ?? (() => {})
+  return {
+    async spawn(task: AgentTask): Promise<AgentHandle> {
+      const controller = new AbortController()
+      const agent =
+        task.agent ??
+        (task.readOnly && options.readOnlyAgent ? options.readOnlyAgent : undefined) ??
+        options.defaultAgent ??
+        "general"
+      const input: Record<string, unknown> = {
+        description: task.title ?? `workflow:${task.id}`,
+        prompt: task.prompt,
+        agent,
+        background: options.background === true,
+      }
+      if (task.model) input.model = task.model
+      const context: Record<string, unknown> = {
+        signal: controller.signal,
+        sessionID: options.parentSessionID,
+        agent,
+        messageID: `wf_${task.id}`,
+        callID: `wf_${task.id}`,
+        progress: async () => {},
+        abort: () => controller.abort(),
+      }
+      const result = await options.tool.execute(input, context)
+      const sessionID = extractToolSessionID(result) ?? `tool:${task.id}`
+      const output = extractToolText(result)
+      log(`agent ${task.id} → native subagent ${sessionID} (background=${options.background === true})`)
+      return {
+        id: task.id,
+        sessionID,
+        wait: async () => ({ status: output ? "completed" : "failed", output }),
+        interrupt: async () => {
+          try {
+            controller.abort()
+          } catch {
+            // ignore
+          }
+        },
+        output: async () => output,
+      }
+    },
+  }
+}

@@ -37,7 +37,9 @@ RPC（供任何客户端）：`POST /api/rpc/workflow.engine/{list|runs|start|sh
 
 ## 自动派发（把重任务交给子代理）
 
-默认开启。每轮会向模型注入「重任务派发」策略，并在识别到**耗时耗力**的任务时**自动**后台启动 workflow，完成后把汇总回注当前会话 —— 不需要用户手动 `/workflow run`。
+默认开启。每轮会向模型注入「重任务派发」策略，并在识别到**耗时耗力**的任务时**自动**派发，完成后把结果带回当前会话 —— 不需要用户手动 `/workflow run`。
+
+**默认执行方式 = OpenCode 原生后台任务**：调用内置 `subagent` 工具（`background: true`），子代理作为可审计的子会话运行，**不在项目内新开窗口**、不阻塞当前会话，完成后由 OpenCode 通知回本会话。若需要并行 + 汇总结论 + 证据落盘 + 缓存续跑，可把 `execution` 设为 `workflow` 走 oc-workflow 引擎。
 
 识别范围（可配置）：
 
@@ -49,9 +51,9 @@ RPC（供任何客户端）：`POST /api/rpc/workflow.engine/{list|runs|start|sh
 | 机械性重复操作 | 批量改写/替换/验证、逐文件处理 |
 
 - 触发条件：启发式打分（关键词 + 多问题 + 篇幅 + 列表/多行）≥ `threshold`；寒暄、`/命令`、显式「不要派发」不会触发。
-- 防递归：workflow 自己创建的子会话不会再触发自动派发。
+- 执行方式 `execution`：`background`（默认，内置 `subagent` 后台任务）或 `workflow`（oc-workflow 引擎：并行→汇总→artifact→缓存）。两者都通过原生 `subagent` 工具承载子代理（可审计子会话）。
+- 防递归：workflow/子代理创建的子会话不会再触发自动派发。
 - 防滥用：同会话 `cooldownMs` 冷却 + `maxPerSession` 上限。
-- 自动派发默认运行内置 `parallel-investigation`（`question` = 用户原始请求），可改为任意已保存 workflow。
 
 配置（后者覆盖前者）：`~/.config/opencode/workflow-auto.json` < `<项目>/.opencode/workflow-auto.json` < 插件 `options.auto`：
 
@@ -62,6 +64,8 @@ RPC（供任何客户端）：`POST /api/rpc/workflow.engine/{list|runs|start|sh
   "injectPolicy": true,
   "threshold": 2,
   "categories": ["explore", "investigate", "review", "mechanical"],
+  "execution": "background",   // background=OpenCode 后台任务(默认) | workflow=oc-workflow 引擎
+  "agent": "general",          // background 模式使用的 agent(如 general / explore)
   "workflow": "parallel-investigation",
   "inputField": "question",
   "cooldownMs": 120000,
@@ -119,7 +123,7 @@ RPC（供任何客户端）：`POST /api/rpc/workflow.engine/{list|runs|start|sh
 
 ## 执行模型
 
-- 每个任务通过 **真实子会话** 运行（`ctx.session.create` → `prompt` → `wait` → `context` 读取结果），会话在桌面端可见、可审计。
+- 每个任务优先经内置 `subagent` 工具承载（OpenCode 原生子代理 / 后台任务，桌面端作为 subagent 展示，可审计）；工具不可用时回退到真实子会话（`ctx.session.create` → `prompt` → `wait` → `context` 读取结果）。
 - `readOnly: true` 的任务默认路由到只读 agent（若存在 `explore`）。
 - `pause` 阻断尚未发布的任务（含并发信号量队列），`resume` 继续；`stop` 中断活动子会话并把未开始步骤标记 `skipped`。
 - `resume-run` 只复用 **已完成** 任务的结果（按 `prompt + agent + model` 指纹）；失败任务不会被缓存。
@@ -166,7 +170,7 @@ oc-workflow/
 
 ## 已知边界（v0.1）
 
-- 自动派发是启发式识别（关键词 + 结构打分），可能漏判或误判；用 `/workflow auto off` 或配置 `categories` / `threshold` 调整；自动触发的 `parallel-investigation` 会消耗额外子代理预算。
+- 自动派发是启发式识别（关键词 + 结构打分），可能漏判或误判；用 `/workflow auto off` 或配置 `categories` / `threshold` 调整；自动派发（无论 background 还是 workflow）会消耗额外子代理预算。原生 `subagent` 工具不可用时（旧内核）自动回退到 oc-workflow 引擎。
 - 仅支持 JSON capsule（可信本地 `.mjs` 模块执行在路线图上；上游的 QuickJS 沙箱不在本版范围）。
 - `capture` 只允许 `git` 前缀命令。
 - 暂停/停止仅对当前进程内的活动 run 生效；历史 run 只能 `show/rerun/resume-run/prune`。

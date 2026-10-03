@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { extractAssistantText, type AgentTask, type SessionBridge } from "../.opencode/plugins/oc-workflow/src/agents"
+import { createToolSubagentBridge, extractAssistantText, extractToolSessionID, extractToolText, type AgentTask, type SessionBridge, type ToolExecuteLike } from "../.opencode/plugins/oc-workflow/src/agents"
 import { AUTO_DEFAULTS, detectHeavy, loadAutoConfig, persistAutoMode, policyText } from "../.opencode/plugins/oc-workflow/src/auto"
 import { builtinCapsules } from "../.opencode/plugins/oc-workflow/src/builtins"
 import { CAPSULE_VERSION, resolveInputs, validateCapsule, type Capsule } from "../.opencode/plugins/oc-workflow/src/capsule"
@@ -127,6 +127,36 @@ describe("extractAssistantText", () => {
     expect(extractAssistantText([{ role: "assistant", content: [{ type: "message.text", text: "a" }, { type: "message.text", text: "b" }] }])).toBe("a\nb")
     expect(extractAssistantText(null)).toBeNull()
     expect(extractAssistantText([{ role: "assistant", text: "plain" }])).toBe("plain")
+  })
+})
+
+describe("native subagent bridge", () => {
+  test("extracts session id and text from varied result shapes", () => {
+    expect(extractToolSessionID({ sessionID: "ses_abc" })).toBe("ses_abc")
+    expect(extractToolSessionID({ metadata: { sessionID: "ses_meta" } })).toBe("ses_meta")
+    expect(extractToolSessionID({ ok: true })).toBeNull()
+    expect(extractToolText({ content: [{ type: "text", text: "hello" }] })).toBe("hello")
+    expect(extractToolText({ output: "out" })).toBe("out")
+    expect(extractToolText("plain")).toBe("plain")
+  })
+
+  test("spawns via the built-in subagent tool with background flag", async () => {
+    const seen: Array<{ input: any; context: any }> = []
+    const tool: ToolExecuteLike = {
+      execute: async (input, context) => {
+        seen.push({ input, context })
+        return { sessionID: "ses_native_1", content: [{ type: "text", text: "native out" }] }
+      },
+    }
+    const bridge = createToolSubagentBridge({ tool, parentSessionID: "ses_parent", defaultAgent: "general", readOnlyAgent: "explore", background: true })
+    const handle = await bridge.spawn({ id: "t1", prompt: "do it", readOnly: true })
+    expect(seen[0]!.input.agent).toBe("explore")
+    expect(seen[0]!.input.background).toBe(true)
+    expect(seen[0]!.context.sessionID).toBe("ses_parent")
+    const result = await handle.wait()
+    expect(result.status).toBe("completed")
+    expect(result.output).toBe("native out")
+    expect(handle.sessionID).toBe("ses_native_1")
   })
 })
 
@@ -328,18 +358,19 @@ describe("engine", () => {
 })
 
 describe("mount (fake host)", () => {
-  function fakeHost(directory: string, options: Record<string, unknown> = {}) {
+  function fakeHost(directory: string, options: Record<string, unknown> = {}, hostOpts: { nativeSubagent?: boolean } = {}) {
     const tools: Array<{ name: string; execute: (input?: unknown, context?: unknown) => Promise<{ content?: string }> }> = []
     const commands: Array<{ name: string; execute: (input: unknown) => Promise<void> }> = []
     const synthetics: Array<{ sessionID: string; text?: string }> = []
     const hooks: Record<string, Array<(input: unknown) => unknown>> = {}
+    const subagentCalls: Array<{ input: any; context: any }> = []
     let rpcDefinition: unknown = null
     let rpcHandlers: Record<string, (input: unknown) => Promise<unknown>> | null = null
     const disposals: string[] = []
     const ctx = {
       location: { directory },
       options,
-      agent: { list: async () => [{ id: "explore" }] },
+      agent: { list: async () => [{ id: "explore" }, { id: "general" }] },
       session: {
         create: async () => ({ id: `ses_child_${synthetics.length}` }),
         prompt: async () => ({}),
@@ -358,6 +389,18 @@ describe("mount (fake host)", () => {
         },
       },
       tool: {
+        list: async () => {
+          if (!hostOpts.nativeSubagent) return []
+          return [
+            {
+              name: "subagent",
+              execute: async (input: any, context: any) => {
+                subagentCalls.push({ input, context })
+                return { sessionID: `ses_bg_${subagentCalls.length}`, content: [{ type: "text", text: "bg output" }] }
+              },
+            },
+          ]
+        },
         transform: async (callback: (editor: { add: (definition: (typeof tools)[number]) => void }) => void) => {
           callback({ add: (definition: (typeof tools)[number]) => tools.push(definition) })
           return { dispose: async () => { disposals.push("tool") } }
@@ -377,7 +420,7 @@ describe("mount (fake host)", () => {
         },
       },
     }
-    return { ctx: ctx as never, tools, commands, synthetics, hooks, disposals, rpc: () => ({ definition: rpcDefinition, handlers: rpcHandlers }) }
+    return { ctx: ctx as never, tools, commands, synthetics, hooks, subagentCalls, disposals, rpc: () => ({ definition: rpcDefinition, handlers: rpcHandlers }) }
   }
 
   test("registers tools + command + rpc and runs end to end", async () => {
@@ -444,6 +487,36 @@ describe("mount (fake host)", () => {
 
     await cleanup()
     expect(host.disposals).toContain("hook:prompt")
+    rmSync(ws.root, { recursive: true, force: true })
+  })
+
+  test("auto-dispatch prefers the native background subagent", async () => {
+    const ws = workspace()
+    const host = fakeHost(ws.root, { auto: { workflow: "demo", cooldownMs: 0, threshold: 1 } }, { nativeSubagent: true })
+    const demo: Capsule = {
+      version: CAPSULE_VERSION,
+      name: "demo",
+      intent: "并行调查",
+      inputs: { question: { type: "string", required: true } },
+      steps: [{ type: "agent", id: "a1", prompt: "{{inputs.question}}" }],
+    }
+    const cleanup = await createMount({
+      catalog: () => ({ entries: [{ name: "demo", source: "builtin", capsule: demo }], errors: [] }),
+      storeFactory: () => new RunStore(join(ws.root, "runs")),
+    })(host.ctx)
+
+    await host.hooks.prompt![0]!({ sessionID: "ses_parent", prompt: { text: "请调查为什么这个测试间歇失败，梳理影响面" } })
+    expect(await waitFor(() => host.subagentCalls.length === 1)).toBe(true)
+    expect(host.subagentCalls[0]!.input.background).toBe(true)
+    expect(host.subagentCalls[0]!.input.agent).toBe("general")
+    expect(host.subagentCalls[0]!.context.sessionID).toBe("ses_parent")
+    expect(await waitFor(() => host.synthetics.some((entry) => (entry.text ?? "").includes("后台任务")))).toBe(true)
+
+    // background path must not create a workflow-engine run
+    const runs = (await host.rpc().handlers!.runs!({ limit: 5 })) as { runs: unknown[] }
+    expect(runs.runs.length).toBe(0)
+
+    await cleanup()
     rmSync(ws.root, { recursive: true, force: true })
   })
 })

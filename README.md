@@ -12,7 +12,7 @@
 | `oc-deepseek-banlance` | DeepSeek 余额（上下文圈 + 审查页） | 服务端 + 桌面注入 |
 | `oc-plugin-manager` | 插件管理器（设置页原生开关启用/禁用） | 服务端 + 桌面注入 |
 | `oc-perf-guard` | 性能守卫（Laya 式脚本资源治理 → 自动降优先级/宽限终止/保留；含 MCP 进程归因清理） | 服务端 + TUI |
-| `oc-workflow` | Workflow（capsule/并行子代理/运行图/缓存续跑 + 重任务自动派发给子代理） | 服务端 + TUI |
+| `oc-workflow` | Workflow（capsule/并行子代理/运行图/缓存续跑 + 重任务自动派发为 OpenCode 后台任务） | 服务端 + TUI |
 | `oc-router-laya` | 档位路由（Laya 四层管线, 多模型档位表） | 服务端 + TUI |
 | `oc-plugin` | OpenCode 插件开发与迁移文档 | 文档 |
 

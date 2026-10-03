@@ -17,6 +17,7 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "no
 import { dirname, join } from "node:path"
 
 export type AutoMode = "auto" | "suggest" | "off"
+export type AutoExecution = "background" | "workflow"
 export type AutoCategory = "explore" | "investigate" | "review" | "mechanical"
 
 export interface AutoConfig {
@@ -32,6 +33,14 @@ export interface AutoConfig {
   readonly workflow: string
   /** 把用户原始请求写入该输入字段 */
   readonly inputField: string
+  /**
+   * 执行方式:
+   *   background = 用内置 subagent 工具起「OpenCode 后台任务」（默认, 不阻塞、不新开项目窗口）
+   *   workflow   = 走 oc-workflow 引擎（并行 + 汇总 + 落盘 + 缓存续跑）
+   */
+  readonly execution: AutoExecution
+  /** background 模式使用的 agent（general / explore 等） */
+  readonly agent: string
   /** 同一会话两次自动触发的最小间隔（毫秒） */
   readonly cooldownMs: number
   /** 同一会话自动触发次数上限 */
@@ -49,6 +58,8 @@ export const AUTO_DEFAULTS: AutoConfig = {
   categories: ["explore", "investigate", "review", "mechanical"],
   workflow: "parallel-investigation",
   inputField: "question",
+  execution: "background",
+  agent: "general",
   cooldownMs: 120_000,
   maxPerSession: 3,
   minPromptLength: 6,
@@ -151,6 +162,26 @@ export function policyText(config: AutoConfig, pending: readonly { name: string;
   return lines.join("\n")
 }
 
+/** background 模式派发用的调查提示词。 */
+export function backgroundPrompt(question: string, intent?: string): string {
+  const goal = intent?.trim() || "对下述任务做并行式调查并给出可复核结论。"
+  return [
+    "你是被自动派发的后台调查员（OpenCode background subagent）。",
+    goal,
+    "",
+    "任务:",
+    `"""${question}"""`,
+    "",
+    "只输出:",
+    "1. 结论清单（按可信度排序）",
+    "2. 关键证据（文件:行号 / 命令输出 / 引用）",
+    "3. 反例与边界条件",
+    "4. 影响面与回归风险",
+    "5. 未决问题与下一步验证建议",
+    "不要臆测；无证据的推断请显式标注。",
+  ].join("\n")
+}
+
 // ── 配置读写 ────────────────────────────────────────────────────────────────
 
 interface FileCacheEntry {
@@ -224,6 +255,8 @@ export function loadAutoConfig(options: LoadAutoOptions): AutoConfig {
     categories: categories.length ? categories : AUTO_DEFAULTS.categories,
     workflow: typeof merged.workflow === "string" && merged.workflow.trim() ? merged.workflow : AUTO_DEFAULTS.workflow,
     inputField: typeof merged.inputField === "string" && merged.inputField.trim() ? merged.inputField : AUTO_DEFAULTS.inputField,
+    execution: merged.execution === "workflow" ? "workflow" : "background",
+    agent: typeof merged.agent === "string" && merged.agent.trim() ? merged.agent : AUTO_DEFAULTS.agent,
     cooldownMs: num(merged.cooldownMs, AUTO_DEFAULTS.cooldownMs, 0),
     maxPerSession: num(merged.maxPerSession, AUTO_DEFAULTS.maxPerSession, 0),
     minPromptLength: num(merged.minPromptLength, AUTO_DEFAULTS.minPromptLength, 0),
