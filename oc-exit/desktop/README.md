@@ -1,28 +1,26 @@
-# Desktop 角标注入（右下角电源角标 + 右键菜单）
+# Desktop 系统托盘注入（右下角通知区域）
 
-`oc-exit-inject.js` 在 OpenCode Desktop / Web UI **右下角**固定显示一个电源角标（`⏻`）：
+`oc-exit-tray.js` 由 `scripts/patch-desktop.mjs` 追加到主进程 `out/main/index.js`，在 **Windows 任务栏右下角通知区域**创建 OpenCode 托盘图标：
 
-- **左键** / **右键** → 弹出菜单：
+- **右键菜单**：
   - `显示 OpenCode` — 显示并激活主窗口
-  - `退出 OpenCode` — 彻底退出（关闭界面 + 结束后台服务）
-- 角标颜色反映服务连接：绿色=已连接，灰色=未连接。
+  - `退出 OpenCode` — 彻底退出（结束 `opencode-cli.exe` 含子进程 + 关闭界面）
+- **左键 / 双击** — 唤出主窗口
+- **关闭主窗口（X）** — 收进托盘（主进程与托盘保留），不再直接退出
 
-## 数据通道
+## 注入位置
 
-服务端插件 RPC：
+`out/main/index.js`（`package.json` 的 `main`），追加块：
 
-- `POST {base}/api/rpc/exit.control/status`（body `{"input":{}}`）
-- `POST {base}/api/rpc/exit.control/focus`
-- `POST {base}/api/rpc/exit.control/quit`
+```js
+;/* oc-exit:tray:start */
+// …创建 Tray / Menu 的片段（desktop/oc-exit-tray.js 内容）…
+;/* oc-exit:tray:end */
+```
 
-- **Web 页面**：`base = location.origin`（同源登录态）
-- **Desktop（`oc://renderer`）**：自动探测本机服务端口（`/api/info`，并行探测 + 失败不缓存）；
-  Electron main 会给顶层 frame 发往本机服务 origin 的请求自动附加 Basic 认证。
+幂等：重复注入会先移除旧块。卸载 `--unpatch` 只移除该块；同时清理早期版本注入到 `out/renderer/index.html` 的角标。
 
 ## 用法
-
-- 控制台：`Ctrl+Shift+I` → Console → 粘贴整个文件。
-- 持久化：
 
 ```powershell
 node scripts/patch-desktop.mjs --dry-run   # 先验证（不改动安装）
@@ -32,15 +30,10 @@ node scripts/patch-desktop.mjs --unpatch   # 只移除本插件注入
 node scripts/patch-desktop.mjs --restore   # 还原备份
 ```
 
-多个插件的注入可叠加（各自文件与 `<script>` 标签，幂等）。桌面端自动更新会覆盖 app.asar，重新执行注入即可。
+桌面端自动更新会覆盖 app.asar，重新执行注入即可。
 
-## 可用 API（注入后）
+## 说明
 
-```js
-ocExit.show()                                    // 显示/激活窗口
-ocExit.quit()                                    // 彻底退出
-ocExit.refresh()                                 // 立即刷新连接状态
-ocExit.state                                     // { connected, error, checkedAt, busy }
-ocExit.setServerBase("http://127.0.0.1:49374")   // 端口探测失败时手动指定
-ocExit.destroy()                                 // 清理注入
-```
+- 主进程是 ESM，注入片段用动态 `import("electron")`，不依赖打包后的压缩变量名。
+- 托盘图标取 asar 内 `resources/icons/icon.ico`（回退 `out/renderer/favicon.ico`），统一缩放到 16×16。
+- 退出用独立 `powershell -Command "taskkill /IM opencode-cli.exe /T /F …"`（`detached + unref`），确保后台服务与 MCP 子进程一并结束。

@@ -53,7 +53,7 @@ for (const relative of [
   check(`plugin ${relative}`, existsSync(join(pluginRoot, relative)))
 }
 check("LICENSE (MIT)", existsSync(join(root, "LICENSE")))
-check("desktop inject", existsSync(join(root, "desktop", "oc-exit-inject.js")))
+check("desktop tray", existsSync(join(root, "desktop", "oc-exit-tray.js")))
 
 const rpc = readFileSync(join(pluginRoot, "src", "rpc.ts"), "utf8")
 check("rpc id exit.control", rpc.includes('"exit.control"'))
@@ -68,11 +68,16 @@ check("focus uses SetForegroundWindow", quit.includes("SetForegroundWindow"))
 const mount = readFileSync(join(pluginRoot, "src", "mount.ts"), "utf8")
 check("mount registers rpc", mount.includes("ctx.rpc.register") && mount.includes("ExitControl"))
 
-const inject = readFileSync(join(root, "desktop", "oc-exit-inject.js"), "utf8")
-check("inject has badge", inject.includes('"badge"') && inject.includes("position:fixed"))
-check("inject has 显示/退出 menu", inject.includes("显示 OpenCode") && inject.includes("退出 OpenCode"))
-check("inject calls exit.control", inject.includes("exit.control") && inject.includes("/quit") && inject.includes("/focus"))
-check("inject syntax (node --check)", spawnSync("node", ["--check", join(root, "desktop", "oc-exit-inject.js")], { encoding: "utf8" }).status === 0)
+const tray = readFileSync(join(root, "desktop", "oc-exit-tray.js"), "utf8")
+check("tray uses Tray/Menu", tray.includes("new Tray(") && tray.includes("Menu.buildFromTemplate"))
+check("tray has 显示/退出 menu", tray.includes("显示 OpenCode") && tray.includes("退出 OpenCode"))
+check("tray hides window on close", tray.includes('"close"') && tray.includes("preventDefault") && tray.includes("hide()"))
+check("tray quit kills opencode-cli", tray.includes("taskkill /IM opencode-cli.exe /T /F"))
+check("tray syntax (node --check)", spawnSync("node", ["--check", join(root, "desktop", "oc-exit-tray.js")], { encoding: "utf8" }).status === 0)
+
+const patch = readFileSync(join(root, "scripts", "patch-desktop.mjs"), "utf8")
+check("patcher targets main process", patch.includes("oc-exit:tray:start") && patch.includes("pkg.main"))
+check("patcher cleans legacy renderer inject", patch.includes("oc-exit-inject.js"))
 
 if (!bun) {
   console.log("WARN  bun not found — skipped build/smoke")
