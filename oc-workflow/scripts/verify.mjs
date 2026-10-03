@@ -53,6 +53,7 @@ for (const relative of [
   "src/catalog.ts",
   "src/agents.ts",
   "src/builtins.ts",
+  "src/auto.ts",
   "src/interpolate.ts",
   "src/rpc.ts",
   "src/util.ts",
@@ -74,6 +75,12 @@ check("mount registers tools", mount.includes("workflow_list") && mount.includes
 check("mount registers command", mount.includes("ctx.command.transform") && mount.includes('name: "workflow"'))
 check("mount registers RPC", mount.includes("ctx.rpc.register"))
 check("save action available", mount.includes('case "save"'))
+check("mount injects context policy + prompt dispatch", mount.includes('hook("context"') && mount.includes('hook("prompt"'))
+check("mount supports /workflow auto", mount.includes('case "auto"'))
+
+const auto = readFileSync(join(pluginRoot, "src", "auto.ts"), "utf8")
+check("auto heuristic + policy", auto.includes("detectHeavy") && auto.includes("policyText"))
+check("auto config file name", auto.includes("workflow-auto.json"))
 
 const engine = readFileSync(join(pluginRoot, "src", "engine.ts"), "utf8")
 check("engine pause/resume/stop", engine.includes("pause(") && engine.includes("resume(") && engine.includes("stop("))

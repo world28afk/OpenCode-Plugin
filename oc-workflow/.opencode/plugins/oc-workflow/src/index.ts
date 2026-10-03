@@ -10,5 +10,6 @@ export * from "./capsule"
 export * from "./catalog"
 export * from "./engine"
 export * from "./store"
+export * from "./auto"
 
 export default { id: PLUGIN_ID, setup: createMount() } satisfies Plugin.Plugin

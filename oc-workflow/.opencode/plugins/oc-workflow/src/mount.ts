@@ -10,12 +10,13 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 import type { Plugin } from "@opencode/plugin"
 import { createSessionBridge, type SessionDomainLike } from "./agents"
+import { detectHeavy, loadAutoConfig, persistAutoMode, policyText, type AutoConfig, type AutoMode } from "./auto"
 import { validateCapsule, type Capsule } from "./capsule"
 import { findEntry, loadCatalog, type Catalog } from "./catalog"
 import { summarizeRun, WorkflowEngine, type BridgeFactory } from "./engine"
 import { WorkflowEngineRpc } from "./rpc"
 import { RunStore } from "./store"
-import { slug } from "./util"
+import { slug, truncate } from "./util"
 
 export const PLUGIN_ID = "oc-workflow"
 export const PLUGIN_VERSION = "0.1.0"
@@ -34,6 +35,7 @@ const USAGE = [
   "  /workflow pause|resume|stop [runId]",
   "  /workflow rerun <runId>            重跑",
   "  /workflow resume-run <runId>       按缓存续跑",
+  "  /workflow auto [on|off|suggest|status]  自动派发开关（默认 on）",
   "  /workflow prune [keep]             清理旧 run",
 ].join("\n")
 
@@ -63,7 +65,9 @@ export function createMount(deps: WorkflowDeps = {}) {
       // agent 列表不可用时 readOnly 任务退回默认 agent
     }
 
-    const bridgeFactory: BridgeFactory = ({ parentSessionID }) =>
+    // 记录 workflow 自己创建的子会话, 用于阻止递归派发（子会话不再触发自动 workflow）。
+    const childSessions = new Set<string>()
+    const rawBridgeFactory: BridgeFactory = ({ parentSessionID }) =>
       createSessionBridge({
         session: ctx.session as unknown as SessionDomainLike,
         directory,
@@ -72,6 +76,53 @@ export function createMount(deps: WorkflowDeps = {}) {
         knownAgents,
         log,
       })
+    const bridgeFactory: BridgeFactory = ({ parentSessionID }) => {
+      const inner = rawBridgeFactory({ parentSessionID })
+      return {
+        async spawn(task) {
+          const handle = await inner.spawn(task)
+          if (handle.sessionID) childSessions.add(handle.sessionID)
+          return handle
+        },
+      }
+    }
+
+    const notify = async (sessionID: string, text: string) => {
+      try {
+        await (ctx.session as unknown as { synthetic: (input: Record<string, unknown>) => Promise<unknown> }).synthetic({
+          sessionID,
+          text,
+          description: "oc-workflow",
+        })
+      } catch {
+        log(text)
+      }
+    }
+
+    // ── 自动派发状态 ────────────────────────────────────────────────────────
+    let autoOverride: { mode?: AutoMode; enabled?: boolean } = {}
+    const autoConfig = (): AutoConfig =>
+      loadAutoConfig({
+        directory,
+        home,
+        pluginOptions: (ctx.options ?? {}) as Record<string, unknown>,
+        override: autoOverride,
+      })
+    const autoRuns = new Map<string, { sessionID: string; name: string; injected: boolean }>()
+    const sessionAuto = new Map<string, { count: number; lastAt: number }>()
+
+    const handleAutoUpdate = (record: { id: string; name: string; status: string; agentsUsed: number; summary?: string | null; error?: string | null }) => {
+      const info = autoRuns.get(record.id)
+      if (!info || info.injected) return
+      if (record.status !== "completed" && record.status !== "failed" && record.status !== "stopped") return
+      info.injected = true
+      const label = record.status === "completed" ? "已完成" : record.status === "failed" ? "失败" : "已停止"
+      const body = record.summary ? truncate(record.summary, 5000) : record.error ?? "(无汇总输出)"
+      void notify(
+        info.sessionID,
+        `[oc-workflow] 自动派发的 ${info.name} ${label}（runId=${record.id}, agents=${record.agentsUsed}）:\n\n${body}\n\n（细节: /workflow show ${record.id}; 关闭自动派发: /workflow auto off）`,
+      )
+    }
 
     let emitRun: (payload: unknown) => void = () => {}
     const engine = new WorkflowEngine({
@@ -79,7 +130,10 @@ export function createMount(deps: WorkflowDeps = {}) {
       store,
       bridge: bridgeFactory,
       log,
-      onUpdate: (record) => emitRun(json({ type: "run.updated", run: summarizeRun(record) })),
+      onUpdate: (record) => {
+        emitRun(json({ type: "run.updated", run: summarizeRun(record) }))
+        handleAutoUpdate(record)
+      },
     })
 
     const registrations: Array<{ dispose: () => Promise<void> }> = []
@@ -95,12 +149,14 @@ export function createMount(deps: WorkflowDeps = {}) {
             input: { type: "object", properties: {}, additionalProperties: false },
             execute: async () => {
               const catalog = catalogOf()
+              const auto = autoConfig()
               return {
                 content: JSON.stringify(
                   {
                     workflows: catalog.entries.map((entry) => ({ name: entry.name, source: entry.source, description: entry.description, inputs: entry.capsule.inputs ?? {} })),
                     errors: catalog.errors,
                     recentRuns: store.list(10).map(summarizeRun),
+                    auto: { enabled: auto.enabled, mode: auto.mode, threshold: auto.threshold, workflow: auto.workflow, categories: auto.categories },
                   },
                   null,
                   2,
@@ -307,6 +363,33 @@ export function createMount(deps: WorkflowDeps = {}) {
                     await reply(sessionID, JSON.stringify(result, null, 2))
                     return
                   }
+                  case "auto": {
+                    const mode = rest[0]
+                    if (!mode || mode === "status") {
+                      const cfg = autoConfig()
+                      await reply(
+                        sessionID,
+                        [
+                          `自动派发: mode=${cfg.mode}（enabled=${cfg.enabled}, 注入策略=${cfg.injectPolicy}）`,
+                          `阈值=${cfg.threshold}  触发 workflow=${cfg.workflow}  冷却=${cfg.cooldownMs}ms  每会话上限=${cfg.maxPerSession}`,
+                          `类别: ${cfg.categories.join(", ")}`,
+                          `配置来源: ${cfg.sources.length ? cfg.sources.join(" | ") : "(默认)"}`,
+                          "用法: /workflow auto on|off|suggest",
+                        ].join("\n"),
+                      )
+                      return
+                    }
+                    const next: AutoMode | null = mode === "on" ? "auto" : mode === "off" ? "off" : mode === "suggest" ? "suggest" : null
+                    if (!next) {
+                      await reply(sessionID, `未知模式: ${mode}（可用 on | off | suggest | status）`)
+                      return
+                    }
+                    autoOverride = { mode: next, enabled: next !== "off" }
+                    const path = persistAutoMode(home, next)
+                    const desc = next === "auto" ? "策略注入 + 自动触发" : next === "suggest" ? "仅策略注入（模型自行决定）" : "关闭"
+                    await reply(sessionID, `自动派发已切换为 ${next}（${desc}），已写入 ${path}`)
+                    return
+                  }
                   case "prune": {
                     const result = await manage({ action: "prune", keep: Number(arg) || 50 })
                     await reply(sessionID, JSON.stringify(result))
@@ -321,6 +404,100 @@ export function createMount(deps: WorkflowDeps = {}) {
               }
             },
           })
+        }),
+      )
+    }
+
+    // ── 会话钩子: 策略注入 + 自动派发 ─────────────────────────────────────────
+
+    const sessionDomain = ctx.session as unknown as {
+      hook?: (name: string, handler: (input: unknown) => unknown) => Promise<{ dispose: () => Promise<void> }>
+      get?: (input: Record<string, unknown>) => Promise<unknown>
+    }
+    if (sessionDomain && typeof sessionDomain.hook === "function") {
+      const isChild = async (sessionID: string): Promise<boolean> => {
+        if (!sessionID) return true
+        if (childSessions.has(sessionID)) return true
+        try {
+          const info = (await sessionDomain.get?.({ sessionID })) as
+            | { parentID?: string; parentSessionID?: string; parent?: { id?: string } }
+            | undefined
+          const parent = info?.parentID ?? info?.parentSessionID ?? info?.parent?.id
+          if (parent) {
+            childSessions.add(sessionID)
+            return true
+          }
+        } catch {
+          // 无法判定时按非子会话处理
+        }
+        return false
+      }
+
+      // context: 每轮向模型注入「重任务派发」策略
+      registrations.push(
+        await sessionDomain.hook("context", (raw: unknown) => {
+          try {
+            const config = autoConfig()
+            if (!config.enabled || config.mode === "off" || !config.injectPolicy) return
+            const event = raw as { sessionID?: string; system?: Array<Record<string, unknown>> }
+            const sessionID = String(event?.sessionID ?? "")
+            if (sessionID && childSessions.has(sessionID)) return
+            const pending = [...autoRuns.entries()]
+              .filter(([, info]) => !info.injected && (!sessionID || info.sessionID === sessionID))
+              .map(([runId, info]) => ({ name: info.name, runId }))
+            event?.system?.push?.({
+              type: "text",
+              text: policyText(config, pending),
+              metadata: { source: PLUGIN_ID, kind: "auto-policy" },
+            })
+          } catch {
+            // 策略注入失败不影响主流程
+          }
+        }),
+      )
+
+      // prompt: 识别重任务 → 后台自动派发 workflow
+      registrations.push(
+        await sessionDomain.hook("prompt", (raw: unknown) => {
+          try {
+            const input = raw as { sessionID?: string; prompt?: { text?: string } }
+            const sessionID = String(input?.sessionID ?? "")
+            const text = String(input?.prompt?.text ?? "")
+            if (!sessionID || !text.trim()) return
+            void (async () => {
+              try {
+                if (await isChild(sessionID)) return
+                const config = autoConfig()
+                if (!config.enabled || config.mode !== "auto") return
+                const detection = detectHeavy(text, config)
+                if (!detection.heavy) return
+                const stat = sessionAuto.get(sessionID) ?? { count: 0, lastAt: 0 }
+                if (stat.count >= config.maxPerSession) return
+                if (Date.now() - stat.lastAt < config.cooldownMs) return
+                const entry = findEntry(catalogOf(), config.workflow)
+                if (!entry) {
+                  log(`auto-dispatch: 未知 workflow ${config.workflow}`)
+                  return
+                }
+                sessionAuto.set(sessionID, { count: stat.count + 1, lastAt: Date.now() })
+                const record = await engine.start(entry.capsule, {
+                  inputs: { [config.inputField]: text, question: text },
+                  parentSessionID: sessionID,
+                  wait: false,
+                })
+                autoRuns.set(record.id, { sessionID, name: entry.name, injected: false })
+                log(`auto-dispatch ${entry.name} runId=${record.id} session=${sessionID} score=${detection.score} [${detection.signals.join(",")}]`)
+                await notify(
+                  sessionID,
+                  `[oc-workflow] 检测到重任务（${detection.categories.join("/") || "heavy"}, score=${detection.score}），已自动派发 ${entry.name}（runId=${record.id}）。完成后结果会回注本会话；/workflow auto off 可关闭。`,
+                )
+              } catch (error) {
+                log(`auto-dispatch failed: ${error instanceof Error ? error.message : String(error)}`)
+              }
+            })()
+          } catch {
+            // 自动派发失败不影响主流程
+          }
         }),
       )
     }

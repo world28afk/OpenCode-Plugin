@@ -29,11 +29,49 @@
 
 模型也可以直接调用三个工具：
 
-- `workflow_list` — 发现 builtin / 项目 / 个人 workflow，列出最近运行
+- `workflow_list` — 发现 builtin / 项目 / 个人 workflow，列出最近运行（含当前自动派发配置）
 - `run_workflow` — 按名字或内联 capsule 运行（默认后台返回 `runId`；`wait: true` 同步等待）
 - `workflow_manage` — `runs | show | pause | resume | stop | rerun | resumeRun | prune | save`
 
 RPC（供任何客户端）：`POST /api/rpc/workflow.engine/{list|runs|start|show|pause|resume|stop|rerun|resumeRun|prune}`，SSE 事件 `rpc.workflow.engine.run`。
+
+## 自动派发（把重任务交给子代理）
+
+默认开启。每轮会向模型注入「重任务派发」策略，并在识别到**耗时耗力**的任务时**自动**后台启动 workflow，完成后把汇总回注当前会话 —— 不需要用户手动 `/workflow run`。
+
+识别范围（可配置）：
+
+| 类别 | 例子 |
+| :--- | :--- |
+| 大范围探索/定位 | 跨多文件检索、架构梳理、调用链/影响面分析 |
+| 调查/根因分析 | bug 根因、为什么失败、间歇性/flaky |
+| 多方案评估/审查 | 代码评审、方案对比、风险与回归评估 |
+| 机械性重复操作 | 批量改写/替换/验证、逐文件处理 |
+
+- 触发条件：启发式打分（关键词 + 多问题 + 篇幅 + 列表/多行）≥ `threshold`；寒暄、`/命令`、显式「不要派发」不会触发。
+- 防递归：workflow 自己创建的子会话不会再触发自动派发。
+- 防滥用：同会话 `cooldownMs` 冷却 + `maxPerSession` 上限。
+- 自动派发默认运行内置 `parallel-investigation`（`question` = 用户原始请求），可改为任意已保存 workflow。
+
+配置（后者覆盖前者）：`~/.config/opencode/workflow-auto.json` < `<项目>/.opencode/workflow-auto.json` < 插件 `options.auto`：
+
+```jsonc
+{
+  "enabled": true,
+  "mode": "auto",              // auto=策略注入+自动触发 | suggest=仅策略注入 | off=关闭
+  "injectPolicy": true,
+  "threshold": 2,
+  "categories": ["explore", "investigate", "review", "mechanical"],
+  "workflow": "parallel-investigation",
+  "inputField": "question",
+  "cooldownMs": 120000,
+  "maxPerSession": 3,
+  "minPromptLength": 6
+}
+```
+
+运行期开关（写入全局配置文件）：`/workflow auto on|off|suggest|status`。
+
 
 ## Capsule v1（`oc.workflow/v1`）
 
@@ -114,11 +152,12 @@ oc-workflow/
 │   ├── src/capsule.ts     # capsule 校验 + 输入解析
 │   ├── src/catalog.ts     # builtin/项目/个人 发现
 │   ├── src/builtins.ts    # 内置 workflow
+│   ├── src/auto.ts        # 自动派发（重任务识别 + 策略注入 + 配置）
 │   ├── src/engine.ts      # 编排/暂停/预算/缓存
 │   ├── src/agents.ts      # 子会话桥接（spawn/wait/取输出）
 │   ├── src/store.ts       # run 持久化
 │   ├── src/interpolate.ts # {{inputs}} / {{steps.output}}
-│   ├── src/mount.ts       # 工具 + 命令 + RPC
+│   ├── src/mount.ts       # 工具 + 命令 + 会话钩子 + RPC
 │   ├── src/rpc.ts         # 契约 workflow.engine
 │   └── tui.tsx            # 状态条 + /workflows 面板
 ├── scripts/verify.mjs · scripts/smoke.test.ts
@@ -127,6 +166,7 @@ oc-workflow/
 
 ## 已知边界（v0.1）
 
+- 自动派发是启发式识别（关键词 + 结构打分），可能漏判或误判；用 `/workflow auto off` 或配置 `categories` / `threshold` 调整；自动触发的 `parallel-investigation` 会消耗额外子代理预算。
 - 仅支持 JSON capsule（可信本地 `.mjs` 模块执行在路线图上；上游的 QuickJS 沙箱不在本版范围）。
 - `capture` 只允许 `git` 前缀命令。
 - 暂停/停止仅对当前进程内的活动 run 生效；历史 run 只能 `show/rerun/resume-run/prune`。

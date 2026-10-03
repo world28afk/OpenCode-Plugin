@@ -6,6 +6,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { extractAssistantText, type AgentTask, type SessionBridge } from "../.opencode/plugins/oc-workflow/src/agents"
+import { AUTO_DEFAULTS, detectHeavy, loadAutoConfig, persistAutoMode, policyText } from "../.opencode/plugins/oc-workflow/src/auto"
 import { builtinCapsules } from "../.opencode/plugins/oc-workflow/src/builtins"
 import { CAPSULE_VERSION, resolveInputs, validateCapsule, type Capsule } from "../.opencode/plugins/oc-workflow/src/capsule"
 import { loadCatalog } from "../.opencode/plugins/oc-workflow/src/catalog"
@@ -151,6 +152,45 @@ describe("catalog", () => {
   })
 })
 
+describe("auto dispatch", () => {
+  test("detectHeavy flags heavy tasks and skips greetings/opt-out", () => {
+    expect(detectHeavy("请调查为什么这个测试间歇失败，并梳理影响面").heavy).toBe(true)
+    expect(detectHeavy("帮我评审这个改动，评估回归风险和方案取舍").heavy).toBe(true)
+    expect(detectHeavy("批量把所有文件里的旧 API 逐个替换").heavy).toBe(true)
+
+    expect(detectHeavy("你好").heavy).toBe(false)
+    expect(detectHeavy("好的，继续").heavy).toBe(false)
+    expect(detectHeavy("/workflow list").heavy).toBe(false)
+    expect(detectHeavy("请调查这个问题，直接告诉我就行，不要派发").heavy).toBe(false)
+    expect(detectHeavy("修一下这个 typo").heavy).toBe(false)
+  })
+
+  test("loadAutoConfig merges files/options/override and persistAutoMode writes", () => {
+    const root = mkdtempSync(join(tmpdir(), "ocwf-auto-"))
+    const project = join(root, "project")
+    const home = join(root, "home")
+    mkdirSync(join(home, ".config", "opencode"), { recursive: true })
+    mkdirSync(join(project, ".opencode"), { recursive: true })
+    writeFileSync(join(home, ".config", "opencode", "workflow-auto.json"), JSON.stringify({ threshold: 5, workflow: "from-global" }))
+    writeFileSync(join(project, ".opencode", "workflow-auto.json"), JSON.stringify({ threshold: 3 }))
+
+    const config = loadAutoConfig({ directory: project, home, pluginOptions: { auto: { workflow: "from-options" } } })
+    expect(config.threshold).toBe(3) // project overrides global
+    expect(config.workflow).toBe("from-options") // options overrides files
+    expect(config.mode).toBe(AUTO_DEFAULTS.mode)
+
+    const off = loadAutoConfig({ directory: project, home, override: { mode: "off" } })
+    expect(off.mode).toBe("off")
+    expect(off.enabled).toBe(false)
+
+    const path = persistAutoMode(home, "suggest")
+    expect(JSON.parse(readFileSync(path, "utf8")).mode).toBe("suggest")
+    expect(policyText(AUTO_DEFAULTS)).toContain("run_workflow")
+    expect(policyText(AUTO_DEFAULTS, [{ name: "parallel-investigation", runId: "wf_x" }])).toContain("wf_x")
+    rmSync(root, { recursive: true, force: true })
+  })
+})
+
 describe("store", () => {
   test("records, results, artifacts and prune", () => {
     const ws = workspace()
@@ -288,16 +328,17 @@ describe("engine", () => {
 })
 
 describe("mount (fake host)", () => {
-  function fakeHost(directory: string) {
+  function fakeHost(directory: string, options: Record<string, unknown> = {}) {
     const tools: Array<{ name: string; execute: (input?: unknown, context?: unknown) => Promise<{ content?: string }> }> = []
     const commands: Array<{ name: string; execute: (input: unknown) => Promise<void> }> = []
     const synthetics: Array<{ sessionID: string; text?: string }> = []
+    const hooks: Record<string, Array<(input: unknown) => unknown>> = {}
     let rpcDefinition: unknown = null
     let rpcHandlers: Record<string, (input: unknown) => Promise<unknown>> | null = null
     const disposals: string[] = []
     const ctx = {
       location: { directory },
-      options: {},
+      options,
       agent: { list: async () => [{ id: "explore" }] },
       session: {
         create: async () => ({ id: `ses_child_${synthetics.length}` }),
@@ -305,6 +346,12 @@ describe("mount (fake host)", () => {
         wait: async () => undefined,
         context: async () => [{ role: "assistant", parts: [{ type: "text", text: "fake output" }] }],
         interrupt: async () => ({}),
+        get: async (input: unknown) =>
+          String((input as { sessionID?: string })?.sessionID ?? "").startsWith("ses_child") ? { parentID: "ses_parent" } : {},
+        hook: async (name: string, handler: (input: unknown) => unknown) => {
+          ;(hooks[name] ??= []).push(handler)
+          return { dispose: async () => { disposals.push(`hook:${name}`) } }
+        },
         synthetic: async (input: { sessionID: string; text?: string }) => {
           synthetics.push(input)
           return {}
@@ -330,7 +377,7 @@ describe("mount (fake host)", () => {
         },
       },
     }
-    return { ctx: ctx as never, tools, commands, synthetics, disposals, rpc: () => ({ definition: rpcDefinition, handlers: rpcHandlers }) }
+    return { ctx: ctx as never, tools, commands, synthetics, hooks, disposals, rpc: () => ({ definition: rpcDefinition, handlers: rpcHandlers }) }
   }
 
   test("registers tools + command + rpc and runs end to end", async () => {
@@ -362,6 +409,41 @@ describe("mount (fake host)", () => {
 
     await cleanup()
     expect(host.disposals).toContain("rpc")
+    rmSync(ws.root, { recursive: true, force: true })
+  })
+
+  test("auto-dispatches heavy prompts and injects the result", async () => {
+    const ws = workspace()
+    const host = fakeHost(ws.root, { auto: { workflow: "auto-demo", cooldownMs: 0, threshold: 1 } })
+    const demo: Capsule = {
+      version: CAPSULE_VERSION,
+      name: "auto-demo",
+      inputs: { question: { type: "string", required: true } },
+      steps: [{ type: "agent", id: "a1", prompt: "{{inputs.question}}" }],
+    }
+    const cleanup = await createMount({
+      catalog: () => ({ entries: [{ name: "auto-demo", source: "builtin", capsule: demo }], errors: [] }),
+      storeFactory: () => new RunStore(join(ws.root, "runs")),
+    })(host.ctx)
+
+    // context hook injects the delegation policy
+    const system: Array<Record<string, unknown>> = []
+    await host.hooks.context![0]!({ sessionID: "ses_parent", system })
+    expect(String(system[0]?.text ?? "")).toContain("run_workflow")
+
+    // prompt hook auto-dispatches a heavy task, then injects the completion
+    await host.hooks.prompt![0]!({ sessionID: "ses_parent", prompt: { text: "请调查为什么这个测试间歇失败，梳理影响面" } })
+    expect(await waitFor(() => host.synthetics.some((entry) => (entry.text ?? "").includes("已自动派发")))).toBe(true)
+    expect(await waitFor(() => host.synthetics.some((entry) => (entry.text ?? "").includes("已完成")))).toBe(true)
+
+    // a child session must not re-trigger auto dispatch
+    const before = host.synthetics.length
+    await host.hooks.prompt![0]!({ sessionID: "ses_child_x", prompt: { text: "调查这个为什么失败，梳理影响面" } })
+    await sleep(80)
+    expect(host.synthetics.length).toBe(before)
+
+    await cleanup()
+    expect(host.disposals).toContain("hook:prompt")
     rmSync(ws.root, { recursive: true, force: true })
   })
 })
