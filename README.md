@@ -11,6 +11,7 @@
 | `oc-infinite-gen-4` | 无限四代内核移植 + 桌面徽章 | 服务端 + 桌面注入 |
 | `oc-deepseek-banlance` | DeepSeek 余额（上下文圈 + 审查页） | 服务端 + 桌面注入 |
 | `oc-plugin-manager` | 插件管理器（设置页原生开关启用/禁用） | 服务端 + 桌面注入 |
+| `oc-exit` | 彻底退出（右下角电源角标 + 右键「显示 / 退出」；关闭界面并结束后台进程） | 服务端 + 桌面注入 |
 | `oc-perf-guard` | 性能守卫（Laya 式脚本资源治理 → 自动降优先级/宽限终止/保留；含 MCP 进程归因清理） | 服务端 + TUI |
 | `oc-workflow` | Workflow（capsule/并行子代理/运行图/缓存续跑 + 重任务自动派发为 OpenCode 后台任务） | 服务端 + TUI |
 | `oc-router-laya` | 档位路由（Laya 四层管线, 多模型档位表） | 服务端 + TUI |
@@ -24,6 +25,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\sync-plugins.ps1
 
 # 2) 桌面注入（各插件自带, 互不影响）
 node .\oc-plugin-manager\scripts\patch-desktop.mjs          # 插件管理器开关
+node .\oc-exit\scripts\patch-desktop.mjs                    # 右下角退出角标
 node .\oc-infinite-gen-4\scripts\patch-desktop.mjs          # 无限四代徽章
 node .\oc-deepseek-banlance\scripts\patch-desktop.mjs       # 余额注入（如有）
 # 或使用各自的 scripts\apply-desktop.ps1（自动关闭→打补丁→重启）

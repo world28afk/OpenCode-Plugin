@@ -1,0 +1,27 @@
+{
+  "name": "oc-exit",
+  "version": "0.1.0",
+  "description": "OpenCode true-exit helper: desktop corner badge + right-click menu (显示 OpenCode / 彻底退出 OpenCode). Terminates the desktop UI and the background server/daemon left behind by the window close (X).",
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./rpc": "./src/rpc.ts",
+    "./tui": "./tui.tsx",
+    "./package.json": "./package.json"
+  },
+  "files": ["src", "index.ts", "tui.tsx"],
+  "keywords": ["opencode", "opencode-plugin", "exit", "quit", "badge", "desktop"],
+  "license": "MIT",
+  "engines": { "opencode": ">=2.0.0" },
+  "peerDependencies": {
+    "@opentui/core": ">=0.5.14",
+    "@opentui/solid": ">=0.5.14",
+    "solid-js": ">=1.9.0"
+  },
+  "peerDependenciesMeta": {
+    "@opentui/core": { "optional": true },
+    "@opentui/solid": { "optional": true },
+    "solid-js": { "optional": true }
+  }
+}
