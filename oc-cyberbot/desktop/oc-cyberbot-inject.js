@@ -3,9 +3,9 @@
  *
  * 在 OpenCode Desktop 的 agent 回复消息操作栏中，为「复制回复」按钮旁追加
  * 一个铅笔图标的「修改回复」按钮。点击后：
- *   - 列出"本轮"（上一次用户消息之后）的全部回复段，自由选择要修改的一条；
- *   - 编辑框预填该条原文；保存通过服务端 RPC (cyberbot.message/edit) 写回
- *     会话存储 (session_message.data)，随后自动刷新界面。
+ *   - 列出"本轮"（上一次用户消息之后）的全部「回复」(text) 与「思考」(reasoning) 段；
+ *   - 点击任意一条进入编辑（预填原文）；每条也可以直接删除（✕）；
+ *   - 保存/删除通过服务端 RPC (cyberbot.message/*) 写回会话存储，随后自动刷新。
  *
  * 启用门控: 仅当服务端插件 oc-cyberbot 处于启用状态（RPC ping 可用）时注入按钮；
  * 插件被禁用后按钮自动消失。
@@ -19,7 +19,7 @@
   "use strict"
   if (window.__ocCyberbot) return
 
-  const VERSION = "0.2.4"
+  const VERSION = "0.3.0"
   const RPC_ID = "cyberbot.message"
   const MARK = "data-oc-cyberbot"
   const LS_BASE = "oc-cyberbot:serverBase"
@@ -27,6 +27,7 @@
   const PORTS = [49374, 4096, 49375, 49376, 49377, 3001]
   const REFRESH_MS = 15_000
   const TARGET_LABEL = "复制回复"
+  const KIND_LABEL = { text: "回复", reasoning: "思考" }
 
   const state = { enabled: false, lastError: null, serverBase: null, buttons: 0 }
   let timer = null
@@ -213,13 +214,13 @@
     return button
   }
 
-  // ---------- 回复列表 + 编辑弹窗 ----------
+  // ---------- 回复/思考 列表 + 编辑弹窗 ----------
 
   function openReplyFlow(info) {
     const colors = themeColors()
 
     let items = []
-    const edited = new Set()
+    let changed = 0
     let closed = false
     let view = "loading" // loading | list | editor
 
@@ -250,7 +251,7 @@
       closed = true
       try { overlay.remove() } catch {}
       document.removeEventListener("keydown", onKey, true)
-      if (edited.size) {
+      if (changed > 0) {
         toast("已保存修改，正在刷新…")
         setTimeout(() => {
           try { location.reload() } catch {}
@@ -272,8 +273,8 @@
 
     function renderLoading() {
       view = "loading"
-      title.textContent = "修改回复"
-      subtitle.textContent = "正在读取本轮回复…"
+      title.textContent = "修改回复 / 思考"
+      subtitle.textContent = "正在读取本轮内容…"
       body.textContent = ""
       footer.textContent = ""
       const cancel = makeButton("取消", false, colors)
@@ -281,27 +282,55 @@
       footer.appendChild(cancel)
     }
 
-    function renderList() {
+    function renderEmpty() {
       view = "list"
-      title.textContent = "修改回复"
-      subtitle.textContent = "本轮共 " + items.length + " 条回复 · 点击选择要修改的一条" + (edited.size ? " · 已修改 " + edited.size + " 条" : "")
+      title.textContent = "修改回复 / 思考"
+      subtitle.textContent = "本轮已无可编辑内容"
+      body.textContent = ""
+      footer.textContent = ""
+      const done = makeButton("完成", true, colors)
+      done.addEventListener("click", closeFlow)
+      footer.appendChild(done)
+    }
+
+    function renderList() {
+      if (!items.length) { renderEmpty(); return }
+      view = "list"
+      title.textContent = "修改回复 / 思考"
+      subtitle.textContent =
+        "本轮共 " + items.length + " 段（思考/回复）· 点击编辑，✕ 删除" + (changed ? " · 已改 " + changed + " 处" : "")
       body.textContent = ""
       footer.textContent = ""
 
       items.forEach((item, index) => {
         const row = document.createElement("div")
-        row.style.cssText = "padding:10px 12px;border-bottom:1px solid " + colors.border + ";cursor:pointer;font-size:13px;line-height:1.5"
+        row.style.cssText = "display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid " + colors.border + ";font-size:13px;line-height:1.5"
+        const badge = document.createElement("span")
+        badge.textContent = KIND_LABEL[item.kind] || item.kind
+        badge.style.cssText =
+          "flex:none;font-size:11px;padding:1px 6px;border-radius:6px;border:1px solid " + colors.border + ";" + (item.kind === "reasoning" ? "color:" + colors.muted : "")
+        const main = document.createElement("div")
+        main.style.cssText = "flex:1;min-width:0;cursor:pointer"
         const head = document.createElement("div")
         head.style.cssText = "font-size:11px;color:" + colors.muted + ";margin-bottom:2px"
-        head.textContent = "#" + (index + 1) + " · " + (item.text.length > 0 ? item.text.length + " 字" : "空") + (edited.has(item.messageID) ? " · 已修改" : "")
+        head.textContent = "#" + (index + 1) + " · " + item.text.length + " 字"
         const preview = document.createElement("div")
         preview.style.cssText = "white-space:nowrap;overflow:hidden;text-overflow:ellipsis"
         const flat = item.text.replace(/\s+/g, " ").trim()
-        preview.textContent = flat.length > 120 ? flat.slice(0, 120) + "…" : flat
-        row.append(head, preview)
-        row.addEventListener("mouseenter", () => { row.style.background = colors.hover })
-        row.addEventListener("mouseleave", () => { row.style.background = "transparent" })
-        row.addEventListener("click", () => renderEditor(item, index))
+        preview.textContent = flat.length > 100 ? flat.slice(0, 100) + "…" : flat
+        main.append(head, preview)
+        main.addEventListener("mouseenter", () => { row.style.background = colors.hover })
+        main.addEventListener("mouseleave", () => { row.style.background = "transparent" })
+        main.addEventListener("click", () => renderEditor(item, index))
+        const del = document.createElement("button")
+        del.textContent = "✕"
+        del.setAttribute("aria-label", "删除")
+        del.style.cssText = "flex:none;width:24px;height:24px;border-radius:6px;border:1px solid " + colors.border + ";background:transparent;color:inherit;cursor:pointer;font-size:12px;line-height:1"
+        del.addEventListener("click", (event) => {
+          event.stopPropagation()
+          void deleteItem(item)
+        })
+        row.append(badge, main, del)
         body.appendChild(row)
       })
 
@@ -312,8 +341,9 @@
 
     function renderEditor(item, index) {
       view = "editor"
-      title.textContent = "修改回复"
-      subtitle.textContent = "第 #" + (index + 1) + " 条（共 " + items.length + " 条）· 保存后返回列表"
+      const kindLabel = KIND_LABEL[item.kind] || "内容"
+      title.textContent = "修改" + kindLabel
+      subtitle.textContent = "第 #" + (index + 1) + " 段（" + kindLabel + "）· 保存或删除后返回列表"
       body.textContent = ""
       footer.textContent = ""
 
@@ -332,18 +362,27 @@
       }, 30)
 
       const back = makeButton("返回", false, colors)
+      const del = makeButton("删除", false, colors)
+      del.style.color = "#e5484d"
       const save = makeButton("保存", true, colors)
       let busy = false
-      back.addEventListener("click", renderList)
+
+      back.addEventListener("click", () => { if (!busy) renderList() })
+      del.addEventListener("click", () => { if (!busy) void deleteItem(item) })
       save.addEventListener("click", async () => {
         if (busy) return
         busy = true
         save.textContent = "保存中…"
         try {
-          const done = await call("edit", { sessionID: info.sessionID, messageID: item.messageID, text: area.value })
+          const done = await call("edit", {
+            sessionID: info.sessionID,
+            messageID: item.messageID,
+            partIndex: item.partIndex,
+            text: area.value,
+          })
           if (done && done.ok === true) {
             item.text = area.value
-            edited.add(item.messageID)
+            changed++
             toast("已保存本条修改")
             busy = false
             save.textContent = "保存"
@@ -357,7 +396,33 @@
         busy = false
         save.textContent = "保存"
       })
-      footer.append(back, save)
+
+      footer.append(back, del, save)
+    }
+
+    async function deleteItem(item) {
+      const kindLabel = KIND_LABEL[item.kind] || "内容"
+      let confirmed = false
+      try {
+        confirmed = window.confirm("确定删除这条" + kindLabel + "吗？此操作不可撤销。")
+      } catch {
+        confirmed = true
+      }
+      if (!confirmed) return
+      try {
+        const res = await call("remove", { sessionID: info.sessionID, messageID: item.messageID, partIndex: item.partIndex })
+        if (!res || res.ok !== true) {
+          toast("删除失败: " + String((res && res.error) || "unknown"), true)
+          return
+        }
+        const idx = items.indexOf(item)
+        if (idx >= 0) items.splice(idx, 1)
+        changed++
+        toast("已删除这条" + kindLabel)
+        renderList()
+      } catch (error) {
+        toast("删除失败: " + String((error && error.message) || error), true)
+      }
     }
 
     document.body.appendChild(overlay)
@@ -372,7 +437,7 @@
       }
       if (closed) return
       if (!items.length) {
-        toast("这一轮没有可编辑的回复文本（可能点在工具步骤上了）", true)
+        toast("这一轮没有可编辑的回复/思考（可能点在工具步骤上了）", true)
         closeFlow()
         return
       }
@@ -495,7 +560,7 @@
       const buttons = document.querySelectorAll(`button[aria-label="${TARGET_LABEL}"]`)
       for (const copyBtn of buttons) {
         // 复制按钮包在应用自带的 tooltip-v2-trigger 容器里（悬停会显示"复制回复"气泡）。
-        // 修改按钮要插到该容器**外面**，否则会继承原容器的气泡；改为自带 title 气泡。
+        // 修改按钮要插到该容器**外面**，否则会继承原容器的气泡；改为自带气泡。
         const wrapper = copyBtn.closest ? copyBtn.closest('[data-component="tooltip-v2-trigger"]') : null
         const anchor = wrapper || copyBtn
         const parent = anchor.parentElement

@@ -1,14 +1,14 @@
 // oc-cyberbot 消息编辑核心 —— 直接读写 OpenCode V2 会话库 (opencode.db)。
 //
 // 数据模型 (V2): 每条消息真身 = session_message.data (JSON 字符串),
-// 其中 content 数组保存各段: reasoning / text / tool / step-finish 等。
-// 界面上"一条可见回复"通常是"一轮"(两条 user 消息之间)的一组 assistant 行,
-// 其中工具步骤行没有 text 段。
+// 其中 content 数组保存各段: reasoning(思考) / text(回复) / tool / step-finish 等。
+// 界面上"一条可见回复"通常是"一轮"(两条 user 消息之间)的一组 assistant 行。
 //
 // 提供的操作:
-//   list  — 列出"本轮"(点击消息所在的、上一次用户消息之后的全部)所有带文本的回复段;
-//   get   — 读取某条消息的文本（若所点行无文本则回溯到本轮最后一条带文本的回复）;
-//   edit  — 改写指定回复段的文本（合并该段全部 text 为一个, reasoning/tool 保留）。
+//   list   — 列出本轮所有可编辑段(text/reasoning)，带 partIndex 精确定位;
+//   get    — 读取整条消息文本（兼容旧调用）;
+//   edit   — 按 partIndex 改写段文本；partIndex 缺省时兼容旧行为（合并替换全部 text 段）;
+//   remove — 按 partIndex 删除段（仅允许 text/reasoning）。
 //
 // 注: OpenCode V2 没有提供"修改消息"的公开 API（仅 GET），因此这里做受控
 // UPDATE；实测服务器读取会话时实时读取数据库（编辑立即可见）。
@@ -26,16 +26,25 @@ export interface TextResult {
   resolvedFrom?: string
 }
 
-export interface ReplyItem {
+export interface OkResult {
+  ok: boolean
+  error?: string
+}
+
+export type EditableKind = "text" | "reasoning"
+
+export interface PartItem {
   messageID: string
-  seq: number
+  partIndex: number
+  kind: EditableKind
   text: string
+  seq: number
   timeCreated: number
 }
 
 export interface ListResult {
   ok: boolean
-  items?: ReplyItem[]
+  items?: PartItem[]
   error?: string
 }
 
@@ -95,6 +104,20 @@ function loadRow(messageID: string): MessageRow | { error: string } {
   return row
 }
 
+function isEditablePart(part: unknown): part is Record<string, unknown> & { type: EditableKind } {
+  if (!part || typeof part !== "object") return false
+  const type = (part as { type?: unknown }).type
+  return type === "text" || type === "reasoning"
+}
+
+function partAt(obj: unknown, index: number): Record<string, unknown> | null {
+  const content = (obj as { content?: unknown[] }).content
+  if (!Array.isArray(content)) return null
+  if (!Number.isInteger(index) || index < 0 || index >= content.length) return null
+  const part = content[index]
+  return part && typeof part === "object" ? (part as Record<string, unknown>) : null
+}
+
 function textParts(obj: unknown): string[] {
   const content = Array.isArray((obj as { content?: unknown[] }).content) ? (obj as { content: unknown[] }).content : []
   return content
@@ -125,8 +148,8 @@ function turnBounds(db: Database, row: MessageRow): { lower: number; upper: numb
   }
 }
 
-/** 列出本轮全部带文本的 assistant 回复段（升序）。 */
-export function listTurnTexts(sessionID: string, messageID: string): ListResult {
+/** 列出本轮全部可编辑段（text/reasoning，带 partIndex，按时间与内容顺序）。 */
+export function listTurnParts(sessionID: string, messageID: string): ListResult {
   try {
     const row = loadRow(messageID)
     if ("error" in row) return { ok: false, error: row.error }
@@ -139,12 +162,24 @@ export function listTurnTexts(sessionID: string, messageID: string): ListResult 
           "where session_id = ? and type = 'assistant' and seq > ? and seq < ? order by seq",
       )
       .all(row.session_id, lower, upper) as MessageRow[]
-    const items: ReplyItem[] = []
+    const items: PartItem[] = []
     for (const candidate of rows) {
       try {
-        const text = collectText(JSON.parse(candidate.data))
-        if (!text.trim()) continue
-        items.push({ messageID: candidate.id, seq: candidate.seq, text, timeCreated: candidate.time_created })
+        const obj = JSON.parse(candidate.data)
+        const content = Array.isArray(obj.content) ? obj.content : []
+        content.forEach((part: unknown, index: number) => {
+          if (!isEditablePart(part)) return
+          const text = String(part.text ?? "")
+          if (!text.trim()) return
+          items.push({
+            messageID: candidate.id,
+            partIndex: index,
+            kind: part.type,
+            text,
+            seq: candidate.seq,
+            timeCreated: candidate.time_created,
+          })
+        })
       } catch {
         // 跳过无法解析的行
       }
@@ -156,10 +191,10 @@ export function listTurnTexts(sessionID: string, messageID: string): ListResult 
 }
 
 /**
- * 解析单条编辑目标行：
+ * 解析单条"整消息"目标行（兼容旧调用）：
  * - 该行有文本 → 用它；
  * - 否则 → 同"轮"最后一个带文本的 assistant 行；
- * - 都没有 → 退回原行（调用方按空文本处理）。
+ * - 都没有 → 退回原行。
  */
 function resolveTarget(db: Database, row: MessageRow): MessageRow {
   try {
@@ -204,6 +239,7 @@ export function readMessageText(sessionID: string, messageID: string): TextResul
   }
 }
 
+/** 兼容旧调用：不使用 partIndex 时，合并替换目标行的全部 text 段。 */
 export function editMessageText(sessionID: string, messageID: string, text: string): TextResult {
   try {
     if (typeof text !== "string") return { ok: false, error: "text 必须是字符串" }
@@ -238,6 +274,54 @@ export function editMessageText(sessionID: string, messageID: string, text: stri
       messageID: target.id,
       resolvedFrom: target.id === row.id ? undefined : row.id,
     }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+/** 按 partIndex 改写单个段（text/reasoning）。 */
+export function editPartText(sessionID: string, messageID: string, partIndex: number, text: string): TextResult {
+  try {
+    if (typeof text !== "string") return { ok: false, error: "text 必须是字符串" }
+    if (text.length > MAX_TEXT) return { ok: false, error: `文本过长（> ${MAX_TEXT}）` }
+    const row = loadRow(messageID)
+    if ("error" in row) return { ok: false, error: row.error }
+    if (sessionID && row.session_id !== sessionID) return { ok: false, error: "消息与会话不匹配" }
+
+    const obj = JSON.parse(row.data) as { content?: unknown[] }
+    const part = partAt(obj, partIndex)
+    if (!part) return { ok: false, error: "partIndex 超出范围（消息可能已被更新）" }
+    if (!isEditablePart(part)) return { ok: false, error: "该段不可编辑（仅支持 text/reasoning）" }
+    part.text = text
+
+    const db = openDb()
+    const statement = db.prepare("update session_message set data = ?, time_updated = ? where id = ?")
+    const result = statement.run(JSON.stringify(obj), Date.now(), row.id)
+    if (!result.changes) return { ok: false, error: "写入未生效（0 行）" }
+    return { ok: true, text, messageID: row.id }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+/** 按 partIndex 删除单个段（仅 text/reasoning）。 */
+export function removePart(sessionID: string, messageID: string, partIndex: number): OkResult {
+  try {
+    const row = loadRow(messageID)
+    if ("error" in row) return { ok: false, error: row.error }
+    if (sessionID && row.session_id !== sessionID) return { ok: false, error: "消息与会话不匹配" }
+
+    const obj = JSON.parse(row.data) as { content?: unknown[] }
+    const part = partAt(obj, partIndex)
+    if (!part) return { ok: false, error: "partIndex 超出范围（消息可能已被更新）" }
+    if (!isEditablePart(part)) return { ok: false, error: "该段不可删除（仅支持 text/reasoning）" }
+    ;(obj.content as unknown[]).splice(partIndex, 1)
+
+    const db = openDb()
+    const statement = db.prepare("update session_message set data = ?, time_updated = ? where id = ?")
+    const result = statement.run(JSON.stringify(obj), Date.now(), row.id)
+    if (!result.changes) return { ok: false, error: "写入未生效（0 行）" }
+    return { ok: true }
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) }
   }

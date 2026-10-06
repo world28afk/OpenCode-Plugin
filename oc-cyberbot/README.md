@@ -1,14 +1,15 @@
 # oc-cyberbot
 
 OpenCode 的「修改回复」插件：在桌面端 agent 回复消息的「复制回复」按钮旁，
-增加一个铅笔图标的「修改回复」按钮，点击即可编辑该条回复的文本并写回会话。
+增加一个铅笔图标的「修改回复」按钮，点击后可列出本轮全部「回复」与「思考」段，
+逐条编辑或删除，并写回会话。
 
 ## 组成
 
 | 部分 | 路径 | 说明 |
 | :--- | :--- | :--- |
 | 服务端插件 | `.opencode/plugins/oc-cyberbot/` | 注册 RPC：ping / get / edit；直接读写 `opencode.db` 的 `session_message` 表 |
-| 桌面注入 | `desktop/oc-cyberbot-inject.js` | 「修改回复」按钮 + 编辑弹窗（renderer 注入） |
+| 桌面注入 | `desktop/oc-cyberbot-inject.js` | 「修改回复」按钮 + 回复/思考列表与编辑、删除（renderer 注入） |
 | 注入工具 | `scripts/patch-desktop.mjs` | 注入 / 移除 / 还原（`--dry-run`、`--unpatch`、`--restore`）|
 | 自动应用 | `scripts/apply-desktop.ps1` | 关闭应用 → 注入 → 重启（一键）|
 
