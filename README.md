@@ -34,6 +34,27 @@ node .\oc-deepseek-banlance\scripts\patch-desktop.mjs       # 余额注入（如
 bun scripts/verify.mjs
 ```
 
+### macOS / 无 Node 环境：`scripts/patch-desktop.py`
+
+Windows 的 `.mjs` 补丁工具依赖 Node + npx；macOS（或任何没有 Node 的机器）直接用根目录的
+跨平台 Python 版（仅标准库、无依赖，一次修补全部 renderer 注入插件）：
+
+```bash
+python3 scripts/patch-desktop.py --dry-run                # 验证（不改动安装）
+python3 scripts/patch-desktop.py                          # 注入（自动备份, 原子替换）
+python3 scripts/patch-desktop.py --only oc-infinite-gen-4 # 只处理指定插件
+python3 scripts/patch-desktop.py --unpatch                # 移除注入（可跟插件名）
+python3 scripts/patch-desktop.py --restore                # 从备份还原
+```
+
+- 默认安装路径：macOS `/Applications/OpenCode.app/Contents/Resources/app.asar`；
+  Windows `%LOCALAPPDATA%\Programs\@opencodedesktop\resources\app.asar`；也可 `--app` 指定（支持打在副本上先验证）。
+- 与 `.mjs` 完全互相兼容：相同标签/插入位置/备份文件名，可交叉 `--restore` / `--unpatch`。
+- 追加式改写（旧数据区原样保留），运行中的桌面端不受影响，重启后生效；重复执行安全（不产生重复标签）。
+- macOS 若重开后被系统报「已损坏」：`xattr -dr com.apple.quarantine /Applications/OpenCode.app`。
+- 适用范围：renderer 注入插件（`oc-infinite-gen-4` / `oc-deepseek-banlance` / `oc-plugin-manager`）；
+  `oc-exit` 为主进程托盘注入（Windows 专属），不在其列。
+
 ## 约定
 
 - 每个仓库自包含：`.opencode/plugins/<name>/` 为插件本体；`scripts/` 含校验与桌面补丁工具；`desktop/` 为注入脚本。
