@@ -10,6 +10,7 @@ import {
   loadConfig,
   normalizeModelId,
   resolveRoute,
+  resolveTierRoute,
   type ModelInfoLike,
   type RouterConfig,
 } from "./config"
@@ -154,26 +155,31 @@ export function createMount(deps: RouterDeps = {}) {
             if (mode !== "auto") {
               entry.appliedReason = "manual"
             } else {
-              const route = resolveRoute(config.tiers, decision.tier, models)
+              // 锚定当前会话模型: 切档只在同一 provider/model 内改 variant, 不跨分组。
+              const observed =
+                config.followSessionModel || config.respectExplicit
+                  ? await currentModel(input.sessionID)
+                  : null
+              const anchor = config.followSessionModel ? observed : null
+              const route = resolveTierRoute(config.tiers, decision.tier, models, anchor)
               if (!route) {
-                entry.appliedReason = "no-route"
+                entry.appliedReason = anchor ? "no-variant-in-current-model" : "no-route"
+              } else if (
+                config.respectExplicit &&
+                session.lastApplied &&
+                observed &&
+                !sameRef(observed, session.lastApplied)
+              ) {
+                // 会话模型已被外部（用户/其它插件）切换 → 尊重显式选择
+                entry.appliedReason = "explicit-model"
+              } else if (session.lastApplied && sameRef(session.lastApplied, route)) {
+                entry.applied = route
+                entry.appliedReason = "already"
               } else {
-                let current: RouteRef | null = null
-                if (config.respectExplicit && session.lastApplied) {
-                  current = await currentModel(input.sessionID)
-                }
-                if (config.respectExplicit && session.lastApplied && current && !sameRef(current, session.lastApplied)) {
-                  // 会话模型已被外部（用户/其它插件）切换 → 尊重显式选择
-                  entry.appliedReason = "explicit-model"
-                } else if (session.lastApplied && sameRef(session.lastApplied, route)) {
-                  entry.applied = route
-                  entry.appliedReason = "already"
-                } else {
-                  await ctx.session.switchModel({ sessionID: input.sessionID, model: route })
-                  session.lastApplied = route
-                  session.appliedAt = Date.now()
-                  entry.applied = route
-                }
+                await ctx.session.switchModel({ sessionID: input.sessionID, model: route })
+                session.lastApplied = route
+                session.appliedAt = Date.now()
+                entry.applied = route
               }
             }
 
@@ -210,6 +216,8 @@ export function createMount(deps: RouterDeps = {}) {
         respectExplicit: config.respectExplicit,
         escalateOnRegenerate: config.escalateOnRegenerate,
         fallback: config.fallback,
+        followSessionModel: config.followSessionModel,
+        tiersConfigured: config.tiersConfigured,
         tiers: resolved,
         sources: config.sources,
         models: { total: models.length, withVariants: variantExamples },
@@ -229,10 +237,13 @@ export function createMount(deps: RouterDeps = {}) {
         constraints: session?.constraints ?? [],
         judge: config.judge,
       })
-      const route = resolveRoute(config.tiers, decision.tier, models)
+      const anchor = config.followSessionModel && sessionID ? await currentModel(sessionID) : null
+      const route = resolveTierRoute(config.tiers, decision.tier, models, anchor)
       return {
         decision: summarizeDecision({ ...decision, sessionID: sessionID ?? "preview", applied: null }, true),
         route,
+        anchor,
+        followSessionModel: config.followSessionModel,
         mode: state.modeOverride ?? config.mode,
       }
     }

@@ -36,6 +36,7 @@
   "respectExplicit": true,     // 检测到会话模型被外部手动切换时，尊重显式选择
   "escalateOnRegenerate": true,
   "fallback": "low",
+  "followSessionModel": true,  // 只在「当前会话模型」内切 variant, 不跨 provider/分组（默认）
   "tiers": {
     "low":  { "providerID": "deepseek", "id": "deepseek-flash", "variant": "low" },
     "high": { "providerID": "deepseek", "id": "deepseek-flash", "variant": "high" },
@@ -49,6 +50,11 @@
 - 也可以跨模型/跨 provider：低档用便宜快模型，高档用最强模型；
 - `variant` 省略时按档位名自动解析（`low → low/minimal/none`，`max → max/xhigh`，兼容 `qwen3.8-flash` 的 `xhigh`）；
 - 默认档位表在启动时从模型注册表自动挑选（首选 `deepseek/deepseek-flash`，否则任意三档 variants 齐全的模型）。
+
+**不跨分组（`followSessionModel`，默认开）**：
+- 未写 `tiers` 时，档位只在**当前会话模型**内切 variant（如在 `opencode-go/glm-5.3-flash` 上切思考等级，仍留在 opencode-go），**不会**因为自动挑了 deepseek 默认表而跳到 deepseek 分组；
+- 当前模型没有目标档位 variant 时**保持不动**（`appliedReason: "no-variant-in-current-model"`），而不是跨模型回退；
+- 一旦你在配置里显式写了 `tiers`（跨模型路由意图），`followSessionModel` 自动置为 `false`；也可显式写 `"followSessionModel": true/false` 覆盖。
 
 ## 入口
 

@@ -27,6 +27,10 @@ export interface RouterConfig {
   readonly escalateOnRegenerate: boolean
   readonly fallback: Tier
   readonly tiers: Partial<Record<Tier, ModelRefLike>>
+  /** 档位表是否来自用户配置（文件/options）。false 表示内置自动挑选。 */
+  readonly tiersConfigured: boolean
+  /** true: 档位只作用于「当前会话模型」的 variant, 不跨 provider/model（默认, 除非用户写了 tiers）。 */
+  readonly followSessionModel: boolean
   readonly historyLimit: number
   readonly sources: string[]
 }
@@ -129,6 +133,29 @@ export function resolveRoute(
   return variant ? { ...configured, variant } : { ...configured }
 }
 
+/**
+ * 档位解析（带「锚定当前会话模型」）。
+ *
+ * anchor 存在时**只在同一 provider/model 内切换 variant**, 绝不跨到档位表里的其它模型
+ * （这是 "切换思考等级却跳到别的分组" 的根因修复）:
+ *   - 当前模型有该档位的 variant → 返回同一模型 + 对应 variant
+ *   - 当前模型没有该档位 variant → 返回 null（调用方应保持不动, 而不是跨模型回退）
+ * 未提供 anchor 时退回静态档位表（保留原有跨模型路由能力）。
+ */
+export function resolveTierRoute(
+  tiers: Partial<Record<Tier, ModelRefLike>>,
+  tier: Tier,
+  models: readonly ModelInfoLike[],
+  anchor?: ModelRefLike | null,
+): ModelRefLike | null {
+  if (anchor?.providerID && anchor.id) {
+    const model = findModel(models, anchor.providerID, anchor.id)
+    const variant = variantFor(model, tier)
+    return variant ? { providerID: anchor.providerID, id: anchor.id, variant } : null
+  }
+  return resolveRoute(tiers, tier, models)
+}
+
 function asModelRef(value: unknown): ModelRefLike | undefined {
   if (!value || typeof value !== "object") return undefined
   const record = value as Record<string, unknown>
@@ -159,15 +186,23 @@ export function loadConfig(options: LoadOptions): RouterConfig {
   const tiersFromFile = (merged.tiers ?? {}) as Record<string, unknown>
   const defaults = pickDefaultTiers(options.models)
   const tiers: Partial<Record<Tier, ModelRefLike>> = { ...defaults }
+  let tiersConfigured = false
   for (const tier of TIERS) {
     const resolved = asModelRef(tiersFromFile[tier])
-    if (resolved) tiers[tier] = resolved
+    if (resolved) {
+      tiers[tier] = resolved
+      tiersConfigured = true
+    }
   }
 
   const mode = merged.mode === "manual" ? "manual" : "auto"
   const judge = merged.judge === "model" ? "model" : merged.judge === "off" ? "off" : "heuristic"
   const judgeModel = asModelRef(merged.judgeModel)
   const fallback = TIERS.includes(merged.fallback as Tier) ? (merged.fallback as Tier) : "low"
+  // 默认锚定当前会话模型: 只在同一模型内切 variant, 不跨 provider。
+  // 用户显式写了 tiers 就是想跨模型路由 → 默认关掉锚定, 除非显式 followSessionModel。
+  const followSessionModel =
+    typeof merged.followSessionModel === "boolean" ? merged.followSessionModel : !tiersConfigured
 
   return {
     mode,
@@ -177,6 +212,8 @@ export function loadConfig(options: LoadOptions): RouterConfig {
     escalateOnRegenerate: merged.escalateOnRegenerate !== false,
     fallback,
     tiers,
+    tiersConfigured,
+    followSessionModel,
     historyLimit: typeof merged.historyLimit === "number" && merged.historyLimit > 0 ? Math.min(200, merged.historyLimit) : 50,
     sources,
   }

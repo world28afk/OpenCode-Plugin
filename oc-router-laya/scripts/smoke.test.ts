@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { loadConfig, pickDefaultTiers, resolveRoute, variantFor, type ModelInfoLike } from "../.opencode/plugins/oc-router-laya/src/config"
+import { loadConfig, pickDefaultTiers, resolveRoute, resolveTierRoute, variantFor, type ModelInfoLike } from "../.opencode/plugins/oc-router-laya/src/config"
 import { judgeHeuristic } from "../.opencode/plugins/oc-router-laya/src/heuristic"
 import { parseIntent } from "../.opencode/plugins/oc-router-laya/src/lexicon"
 import { createMount } from "../.opencode/plugins/oc-router-laya/src/mount"
@@ -140,6 +140,32 @@ describe("config", () => {
     expect(route).toMatchObject({ providerID: "opencode-go", id: "qwen3.8-flash", variant: "medium" })
   })
 
+  test("resolveTierRoute anchors to the session model (no cross-group jump)", () => {
+    const anchor = { providerID: "opencode-go", id: "glm-5.3-flash" }
+    expect(resolveTierRoute({}, "max", MODELS, anchor)).toMatchObject({ providerID: "opencode-go", id: "glm-5.3-flash", variant: "max" })
+    // 当前模型无该档位 variant → null（保持不动, 不跨模型）
+    expect(resolveTierRoute({}, "max", MODELS, { providerID: "x", id: "plain" })).toBeNull()
+    // 未锚定 → 回退静态档位表（保留跨模型路由）
+    expect(resolveTierRoute({ max: { providerID: "deepseek", id: "deepseek-flash", variant: "max" } }, "max", MODELS, null)).toMatchObject({ providerID: "deepseek" })
+  })
+
+  test("followSessionModel defaults on for auto tiers, off when tiers configured", () => {
+    const root = mkdtempSync(join(tmpdir(), "ocrouter-anchcfg-"))
+    const home = join(root, "home")
+    const auto = loadConfig({ directory: join(root, "empty"), models: MODELS, home })
+    expect(auto.followSessionModel).toBe(true)
+    expect(auto.tiersConfigured).toBe(false)
+    const configured = loadConfig({
+      directory: join(root, "empty"),
+      models: MODELS,
+      home,
+      pluginOptions: { tiers: { max: { providerID: "opencode-go", id: "glm-5.3-flash" } } },
+    })
+    expect(configured.tiersConfigured).toBe(true)
+    expect(configured.followSessionModel).toBe(false)
+    rmSync(root, { recursive: true, force: true })
+  })
+
   test("file precedence: options > project > global", () => {
     const root = mkdtempSync(join(tmpdir(), "ocrouter-"))
     const home = join(root, "home")
@@ -160,7 +186,7 @@ describe("config", () => {
 })
 
 describe("mount (fake host)", () => {
-  function fakeHost(directory: string) {
+  function fakeHost(directory: string, initialModel: Record<string, unknown> = { providerID: "deepseek", id: "deepseek-flash", variant: "low" }) {
     const tools: Array<{ name: string; execute: (input?: unknown, context?: unknown) => Promise<{ content?: string }> }> = []
     const commands: Array<{ name: string; execute: (input: unknown) => Promise<void> }> = []
     const synthetics: Array<{ sessionID: string; text?: string }> = []
@@ -186,7 +212,7 @@ describe("mount (fake host)", () => {
           model:
             switches.length > 0
               ? (switches[switches.length - 1]!.model as Record<string, unknown>)
-              : { providerID: "deepseek", id: "deepseek-flash", variant: "low" },
+              : initialModel,
         }),
         synthetic: async (input: { sessionID: string; text?: string }) => {
           synthetics.push(input)
@@ -258,6 +284,28 @@ describe("mount (fake host)", () => {
 
     await cleanup()
     expect(host.disposals).toContain("rpc")
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  test("anchors tier to the current session model (no cross-group jump)", async () => {
+    const root = mkdtempSync(join(tmpdir(), "ocrouter-anchor-"))
+    const host = fakeHost(root, { providerID: "opencode-go", id: "glm-5.3-flash" })
+    const cleanup = await createMount({ home: join(root, "home") })(host.ctx)
+
+    // 当前在 opencode-go/glm-5.3-flash（无 variant）, 命中 max 档 → 只加 variant, 不跳 deepseek
+    await host.hook()!({ sessionID: "ses_anchor", prompt: { text: "为什么这个算法这样设计" } })
+    expect(host.switches.length).toBe(1)
+    expect(host.switches[0]).toMatchObject({
+      model: { providerID: "opencode-go", id: "glm-5.3-flash", variant: "max" },
+    })
+
+    // 用户手动降思考等级到 low（同模型改 variant）→ 插件跟随, 仍不换 provider
+    await host.hook()!({ sessionID: "ses_anchor", prompt: { text: "省点，简单说说" } })
+    const last = host.switches[host.switches.length - 1]!
+    expect((last.model as Record<string, unknown>).providerID).toBe("opencode-go")
+    expect((last.model as Record<string, unknown>).variant).toBe("low")
+
+    await cleanup()
     rmSync(root, { recursive: true, force: true })
   })
 
