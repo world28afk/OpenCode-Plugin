@@ -1,0 +1,19 @@
+{
+  "name": "oc-bark",
+  "version": "0.3.1",
+  "description": "OpenCode task events to Bark (iOS): completion / permission / error pushes — mirrors the built-in desktop sound triggers. Keeps the desktop sound untouched.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./rpc": "./src/rpc.ts",
+    "./package.json": "./package.json"
+  },
+  "files": ["src", "index.ts"],
+  "keywords": ["opencode", "opencode-plugin", "bark", "ios", "push", "notification"],
+  "license": "MIT",
+  "engines": { "opencode": ">=2.0.0" },
+  "devDependencies": {
+    "@opencode/plugin": "^2.0.24"
+  }
+}
