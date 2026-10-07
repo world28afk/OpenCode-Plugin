@@ -81,6 +81,7 @@ check("staged enforcement wired", mount.includes("graceMs") && mount.includes("g
 
 const scripts = readFileSync(join(pluginRoot, "src", "scripts.ts"), "utf8")
 check("cpu sampling from process times", scripts.includes("computeCpuPercents"))
+check("protect list: 桥/代理永不进候选", scripts.includes("DEFAULT_PROTECT_PATTERNS") && scripts.includes("isProtectedProcess"))
 const processes2 = readFileSync(join(pluginRoot, "src", "processes.ts"), "utf8")
 check("collector reads CPU counters", processes2.includes("KernelModeTime") && processes2.includes("StartMs"))
 check("collector excluded", scripts.includes("isCollectorProcess"))
@@ -92,6 +93,16 @@ check("actionable messages", judge.includes("script_keep(pid=") && judge.include
 const governor = readFileSync(join(pluginRoot, "src", "governor.ts"), "utf8")
 check("governor staged kill", governor.includes("graceUntil") && governor.includes('"idle"'))
 check("governor action history + limit", governor.includes("listActions") && governor.includes("maxActionsPerHour"))
+check(
+  "keeps 热载存活 (seed/persist)",
+  governor.includes("pendingKeeps") &&
+    governor.includes("seedKeep") &&
+    governor.includes("listKeeps") &&
+    mount.includes("STORAGE_KEEPS") &&
+    mount.includes("persistKeeps") &&
+    mount.includes("keeps: restoredKeeps"),
+)
+check("script_list 暴露 protect/keeps", mount.includes("protect: scriptPayload().protect") && mount.includes("keeps: scriptPayload().keeps"))
 
 const processes = readFileSync(join(pluginRoot, "src", "processes.ts"), "utf8")
 check("uses taskkill for trees", processes.includes('"taskkill"') && processes.includes('"/T"'))

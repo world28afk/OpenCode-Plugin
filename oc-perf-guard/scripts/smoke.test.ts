@@ -4,7 +4,7 @@ import { describe, expect, test } from "bun:test"
 import { categorize, executeCleanup, linkState, resetSnapshotCache, planCleanup, snapshot, type ProcInfo } from "../.opencode/plugins/oc-perf-guard/src/processes"
 import { createMount, extractCommand } from "../.opencode/plugins/oc-perf-guard/src/mount"
 import { ScriptGovernor } from "../.opencode/plugins/oc-perf-guard/src/governor"
-import { computeCpuPercents, findCandidates, isCollectorProcess, type ScriptCandidate } from "../.opencode/plugins/oc-perf-guard/src/scripts"
+import { computeCpuPercents, findCandidates, isCollectorProcess, isProtectedProcess, type ScriptCandidate } from "../.opencode/plugins/oc-perf-guard/src/scripts"
 import { classifyCommand, judgeScript } from "../.opencode/plugins/oc-perf-guard/src/judge"
 
 const procFull = (pid: number, ppid: number, name: string, mb: number, cmd: string, cpuTimeMs: number, startMs: number): ProcInfo => ({
@@ -92,13 +92,23 @@ describe("snapshot", () => {
 })
 
 describe("mount (fake host)", () => {
-  function makeContext(options: Record<string, unknown>) {
+  function makeContext(options: Record<string, unknown>, storage?: Map<string, unknown>) {
     const tools: Array<{ name: string; execute: (input?: unknown) => Promise<{ content?: string }> }> = []
     let rpcDefinition: unknown = null
     let rpcHandlers: Record<string, (input: unknown) => Promise<unknown>> | null = null
     const disposals: string[] = []
     const ctx = {
       options,
+      ...(storage
+        ? {
+            storage: {
+              get: async (key: string) => storage.get(key),
+              set: async (key: string, value: unknown) => {
+                storage.set(key, value)
+              },
+            },
+          }
+        : {}),
       tool: {
         transform: async (callback: (editor: Record<string, unknown>) => void) => {
           callback({
@@ -181,8 +191,7 @@ describe("scripts (cpu / candidates)", () => {
     expect(isCollectorProcess(procFull(2, 0, "node.exe", 30, "node app.js", 0, 0))).toBe(false)
   })
 
-  test("findCandidates picks hogs and forgotten scripts, skips MCP/young/collector", () => {
-    const now = 1_798_000_000_000
+  test("findCandidates picks hogs and forgotten scripts, skips MCP/young/collector", () => {    const now = 1_798_000_000_000
     const procs: ProcInfo[] = [
       procFull(1, 0, "opencode-cli.exe", 600, "opencode-cli.exe serve --service", 0, 0),
       procFull(11, 1, "node.exe", 900, "node hog.js", 5000, now - 120_000),
@@ -205,6 +214,20 @@ describe("scripts (cpu / candidates)", () => {
     const forgotten = candidates.find((candidate) => candidate.pid === 40)!
     expect(forgotten.link).toBe("dead")
     expect(forgotten.reason).toContain("age")
+  })
+
+  test("保护名单: 本地桥/代理（oc-web-bridge）永不进候选", () => {
+    const now = 1_798_000_000_000
+    const bridgeCmd = '"D:\\CodeEnv\\nodejs\\node.exe" "D:\\OpenCode-Plugin\\tools\\oc-web-bridge\\bridge.mjs"'
+    const bridge = procFull(60, 1, "node.exe", 42, bridgeCmd, 0, now - 8 * 3_600_000)
+    const ordinary = procFull(50, 1, "node.exe", 380, "node D:\\work\\legacy-daemon.js", 0, now - 8 * 3_600_000)
+    expect(isProtectedProcess(bridge)).toBe(true)
+    expect(isProtectedProcess(ordinary)).toBe(false)
+
+    const procs = [procFull(1, 0, "opencode-cli.exe", 600, "opencode-cli.exe serve --service", 0, 0), bridge, ordinary]
+    const thresholds = { cpuPercent: 70, memoryMB: 1200, maxRuntimeMs: 600_000, minAgeMs: 10_000, askCooldownMs: 1_000, keepMs: 1_800_000 }
+    const candidates = findCandidates(procs, { cpu: new Map(), thresholds, now })
+    expect(candidates.map((candidate) => candidate.pid)).toEqual([50]) // 60 被保护, 50 正常候选
   })
 })
 
@@ -235,10 +258,25 @@ describe("judge (Laya-style rules)", () => {
   test("classifyCommand", () => {
     expect(classifyCommand("npm run dev --watch")).toBe("server")
     expect(classifyCommand("node server.js")).toBe("server")
+    expect(classifyCommand('node "D:\\OpenCode-Plugin\\tools\\oc-web-bridge\\bridge.mjs"')).toBe("server")
+    expect(classifyCommand("node reverse-proxy.js")).toBe("server")
     expect(classifyCommand("npm run build")).toBe("long-job")
     expect(classifyCommand("pytest -q")).toBe("long-job")
     expect(classifyCommand('node -e "while(true){}"')).toBe("one-shot")
     expect(classifyCommand("python foo.py")).toBe("one-shot")
+  })
+
+  test("常驻桥/代理空闲高时长 → nice（不误杀）", () => {
+    const bridge = makeCandidate({
+      command: 'node "D:\\OpenCode-Plugin\\tools\\oc-web-bridge\\bridge.mjs"',
+      cmd: 'node "D:\\OpenCode-Plugin\\tools\\oc-web-bridge\\bridge.mjs"',
+      cpuPercent: 0,
+      ageMs: 8 * 3_600_000,
+      mb: 40,
+    })
+    const verdict = judgeScript(bridge, base)
+    expect(verdict.action).toBe("nice")
+    expect(verdict.kind).toBe("server")
   })
 
   test("rules pick kill / nice / observe", () => {
@@ -345,6 +383,64 @@ describe("ScriptGovernor (staged enforcement)", () => {
     expect(result.action).toBe("notify")
     expect(notices.join("\n")).toContain("仅通知模式")
   })
+
+  test("keep 持久化: 载入 seed 后新条目直接 kept, 不告警/不动作", async () => {
+    let clock = 9_000_000
+    const niceCalls: number[] = []
+    const governor = new ScriptGovernor({
+      thresholds: { cpuPercent: 70, memoryMB: 500, maxRuntimeMs: 300_000, minAgeMs: 0, askCooldownMs: 1_000, keepMs: 60_000 },
+      mode: "auto",
+      graceMs: 1_000,
+      memoryKillMB: 800,
+      idleCpuPercent: 5,
+      now: () => clock,
+      keeps: [{ pid: 11, until: clock + 600_000 }], // 热载前持久化的 script_keep
+      nice: (pid) => {
+        niceCalls.push(pid)
+        return { ok: true, output: "Idle" }
+      },
+      kill: () => ({ ok: true, output: "ok" }),
+    })
+    const hog = makeCandidate()
+    const observed = governor.observe([hog])
+    expect(observed.alerts).toEqual([]) // seed 命中 → 不打扰
+    const enforced = await governor.enforce(hog)
+    expect(enforced.action).toBe("keep")
+    expect(niceCalls).toEqual([])
+    expect(governor.listKeeps()).toEqual([{ pid: 11, until: clock + 600_000 }])
+
+    // 到期后恢复治理
+    clock += 700_000
+    expect(governor.listKeeps()).toEqual([])
+    expect(governor.observe([hog]).alerts).toHaveLength(1)
+  })
+
+  test("keep 后条目被清理再重检测, 仍受保护 (重检测不复活待终止)", async () => {
+    const clock = 3_000_000
+    const niceCalls: number[] = []
+    const governor = new ScriptGovernor({
+      thresholds: { cpuPercent: 70, memoryMB: 500, maxRuntimeMs: 300_000, minAgeMs: 0, askCooldownMs: 1_000, keepMs: 60_000 },
+      mode: "auto",
+      graceMs: 1_000,
+      memoryKillMB: 800,
+      idleCpuPercent: 5,
+      now: () => clock,
+      nice: (pid) => {
+        niceCalls.push(pid)
+        return { ok: true, output: "Idle" }
+      },
+      kill: () => ({ ok: true, output: "ok" }),
+      actionCooldownMs: 0,
+    })
+    const hog = makeCandidate()
+    governor.observe([hog])
+    expect(governor.keep(11, 30).ok).toBe(true)
+    governor.observe([]) // 条目被清理（模拟采样空窗/热载）
+    const again = governor.observe([hog]) // 重新检测
+    expect(again.alerts).toEqual([])
+    expect((await governor.enforce(hog)).action).toBe("keep")
+    expect(niceCalls).toEqual([])
+  })
 })
 
 describe("mount script governance", () => {
@@ -428,5 +524,88 @@ describe("mount script governance", () => {
     expect(extractCommand({ command: "python x.py" })).toBe("python x.py")
     expect(extractCommand({ cmd: "node -e 1" })).toBe("node -e 1")
     expect(extractCommand({ foo: 1 })).toBeNull()
+  })
+
+  test("script_keep 持久化 + 热载恢复; 桥进程受保护", async () => {
+    const storage = new Map<string, unknown>()
+    const niced: number[] = []
+    const procs = () => [
+      procFull(1, 0, "opencode-cli.exe", 600, "opencode-cli.exe serve --service", 0, 0),
+      procFull(50, 1, "node.exe", 380, "node legacy-daemon.js", 0, Date.now() - 8 * 3_600_000),
+      procFull(60, 1, "node.exe", 42, '"D:\\CodeEnv\\nodejs\\node.exe" "D:\\OpenCode-Plugin\\tools\\oc-web-bridge\\bridge.mjs"', 0, Date.now() - 8 * 3_600_000),
+    ]
+    const makeCtx = () => {
+      const tools: Array<{ name: string; execute: (input?: unknown) => Promise<{ content?: string }> }> = []
+      const ctx = {
+        options: {
+          scripts: {
+            enabled: true,
+            intervalMs: 3_600_000,
+            mode: "auto",
+            memoryMB: 500,
+            memoryKillMB: 800,
+            cpuPercent: 999,
+            maxRuntimeMs: 300_000,
+            minAgeMs: 0,
+            graceMs: 60_000,
+            actionCooldownMs: 0,
+          },
+        },
+        session: { synthetic: async () => ({}), prompt: async () => ({}) },
+        storage: {
+          get: async (key: string) => storage.get(key),
+          set: async (key: string, value: unknown) => {
+            storage.set(key, value)
+          },
+        },
+        tool: {
+          transform: async (callback: (editor: { add: (definition: (typeof tools)[number]) => void }) => void) => {
+            callback({ add: (definition) => tools.push(definition) })
+            return { dispose: async () => {} }
+          },
+        },
+        rpc: { register: async () => ({ dispose: async () => {}, events: { emit: async () => {} } }) },
+      }
+      return { ctx, tools }
+    }
+    const deps = {
+      collect: procs,
+      nice: (pid: number) => {
+        niced.push(pid)
+        return { ok: true, output: "Idle" }
+      },
+      kill: () => ({ ok: true, output: "ok" }),
+      notify: async () => {},
+    }
+
+    // 第一段: 治理触发 → script_keep(50) → 持久化; 桥(60)不进候选
+    const first = makeCtx()
+    const cleanup1 = await createMount(deps)(first.ctx as never)
+    await (cleanup1 as unknown as { tickScripts: () => Promise<unknown> }).tickScripts()
+    expect(niced).toEqual([50])
+    const keepResult = JSON.parse((await first.tools.find((tool) => tool.name === "script_keep")!.execute({ pid: 50, minutes: 120 })).content ?? "{}")
+    expect(keepResult.ok).toBe(true)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    const persisted = storage.get("perf.guard.keeps") as Array<{ pid: number; until: number }>
+    expect(persisted.some((entry) => entry.pid === 50)).toBe(true)
+    await (cleanup1 as unknown as () => Promise<void>)()
+
+    // 第二段（同 storage = 热载）: 50 直接 kept, 不再 nice; 桥仍被保护
+    const niced2: number[] = []
+    const second = makeCtx()
+    const cleanup2 = await createMount({
+      ...deps,
+      nice: (pid: number) => {
+        niced2.push(pid)
+        return { ok: true, output: "Idle" }
+      },
+    })(second.ctx as never)
+    await (cleanup2 as unknown as { tickScripts: () => Promise<unknown> }).tickScripts()
+    expect(niced2).toEqual([])
+    const listed = JSON.parse((await second.tools.find((tool) => tool.name === "script_list")!.execute({})).content ?? "{}")
+    expect(listed.candidates.some((candidate: { pid: number }) => candidate.pid === 60)).toBe(false)
+    expect(listed.tracking.find((entry: { pid: number }) => entry.pid === 50)?.state).toBe("kept")
+    expect(listed.protect).toContain("oc-web-bridge")
+    await (cleanup2 as unknown as () => Promise<void>)()
   })
 })

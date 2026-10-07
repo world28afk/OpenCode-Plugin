@@ -22,10 +22,18 @@ import {
   type SnapshotOptions,
 } from "./processes"
 import { PerfGuard } from "./rpc"
-import { computeCpuPercents, DEFAULT_SCRIPT_THRESHOLDS, findCandidates, type CommandRecord, type ScriptThresholds } from "./scripts"
+import {
+  computeCpuPercents,
+  DEFAULT_PROTECT_PATTERNS,
+  DEFAULT_SCRIPT_THRESHOLDS,
+  findCandidates,
+  type CommandRecord,
+  type ScriptThresholds,
+} from "./scripts"
 
 export const PLUGIN_ID = "oc-perf-guard"
-export const PLUGIN_VERSION = "0.2.0"
+export const PLUGIN_VERSION = "0.3.0"
+const STORAGE_KEEPS = "perf.guard.keeps"
 
 export interface PerfDeps {
   /** 采集进程列表（默认 PowerShell CIM; 测试注入 fixture） */
@@ -64,6 +72,8 @@ interface ScriptsOptions {
   idleCpuPercent?: number
   /** 同 PID 两次动作的最小间隔。 */
   actionCooldownMs?: number
+  /** 追加的保护名单（命令子串; 桥/代理等常驻工具永不管辖）。默认表始终生效。 */
+  protect?: string[]
 }
 
 function hasFunction(value: unknown, key: string): boolean {
@@ -107,6 +117,9 @@ export function createMount(deps: PerfDeps = {}) {
     const scriptIntervalMs = typeof scriptOptions.intervalMs === "number" ? Math.max(5_000, scriptOptions.intervalMs) : 30_000
     const scriptMode: "auto" | "notify" = scriptOptions.mode === "notify" || scriptOptions.ask === false ? "notify" : "auto"
     const notifyPrompt = scriptOptions.notifyPrompt === true
+    const scriptProtect = Array.isArray(scriptOptions.protect)
+      ? scriptOptions.protect.filter((pattern): pattern is string => typeof pattern === "string")
+      : []
     const scriptGraceMs = typeof scriptOptions.graceMs === "number" ? Math.max(1_000, scriptOptions.graceMs) : 120_000
     const scriptMemoryKillMB = typeof scriptOptions.memoryKillMB === "number" ? scriptOptions.memoryKillMB : undefined
     const scriptIdleCpu = typeof scriptOptions.idleCpuPercent === "number" ? scriptOptions.idleCpuPercent : 5
@@ -186,12 +199,30 @@ export function createMount(deps: PerfDeps = {}) {
       })
 
     const killRunner = deps.runner ?? taskkillRunner
+
+    // 热载/重启后恢复 script_keep（否则内存态丢失, 待终止的脚本会被重新判杀）
+    let restoredKeeps: Array<{ pid: number; until: number }> = []
+    if (hasFunction(ctx.storage, "get")) {
+      try {
+        const raw = await ctx.storage.get(STORAGE_KEEPS)
+        if (Array.isArray(raw)) {
+          restoredKeeps = raw.filter(
+            (entry): entry is { pid: number; until: number } =>
+              !!entry && typeof entry === "object" && typeof (entry as { pid?: unknown }).pid === "number" && typeof (entry as { until?: unknown }).until === "number",
+          )
+        }
+      } catch {
+        // ignore
+      }
+    }
+
     const governor = new ScriptGovernor({
       thresholds,
       mode: scriptMode,
       graceMs: scriptGraceMs,
       memoryKillMB: scriptMemoryKillMB ?? thresholds.memoryMB * 2,
       idleCpuPercent: scriptIdleCpu,
+      keeps: restoredKeeps,
       ...(deps.now ? { now: deps.now } : {}),
       log,
       notify: notifyModel,
@@ -217,9 +248,19 @@ export function createMount(deps: PerfDeps = {}) {
       const cpu = previousAt > 0 ? computeCpuPercents(previousProcs, procs, elapsed, cores) : new Map<number, number>()
       previousProcs = procs
       previousAt = sampledAt
-      const candidates = findCandidates(procs, { commands, cpu, thresholds, now: sampledAt })
+      const candidates = findCandidates(procs, { commands, cpu, thresholds, now: sampledAt, protect: scriptProtect })
       const result = governor.observe(candidates)
       return { candidates, result, sampledAt }
+    }
+
+    /** 持久化 script_keep（热载后仍然有效）。 */
+    const persistKeeps = (): void => {
+      if (!hasFunction(ctx.storage, "set")) return
+      try {
+        void Promise.resolve(ctx.storage.set(STORAGE_KEEPS, governor.listKeeps() as unknown as never)).catch(() => {})
+      } catch {
+        // ignore
+      }
     }
 
     const scriptPayload = () => ({
@@ -228,6 +269,8 @@ export function createMount(deps: PerfDeps = {}) {
       graceMs: scriptGraceMs,
       thresholds,
       memoryKillMB: scriptMemoryKillMB ?? thresholds.memoryMB * 2,
+      protect: [...DEFAULT_PROTECT_PATTERNS, ...scriptProtect],
+      keeps: governor.listKeeps(),
       commandsTracked: commands.length,
       tracking: governor.list().map((entry) => ({
         pid: entry.pid,
@@ -322,6 +365,8 @@ export function createMount(deps: PerfDeps = {}) {
                     enabled: true,
                     mode: scriptMode,
                     thresholds,
+                    protect: scriptPayload().protect,
+                    keeps: scriptPayload().keeps,
                     alerts: result.alerts.map((alert) => ({
                       pid: alert.pid,
                       reason: alert.reason,
@@ -373,7 +418,9 @@ export function createMount(deps: PerfDeps = {}) {
             },
             execute: async (input) => {
               const value = input as { pid: number; minutes?: number }
-              return { content: JSON.stringify(governor.keep(Number(value.pid), value.minutes), null, 2) }
+              const result = governor.keep(Number(value.pid), value.minutes)
+              if (result.ok) persistKeeps()
+              return { content: JSON.stringify(result, null, 2) }
             },
           })
           editor.add({
@@ -424,7 +471,9 @@ export function createMount(deps: PerfDeps = {}) {
           scriptKill: async (input: unknown) => json(governor.kill(Number((input as { pid: number }).pid))),
           scriptKeep: async (input: unknown) => {
             const value = input as { pid: number; minutes?: number }
-            return json(governor.keep(Number(value.pid), value.minutes))
+            const result = governor.keep(Number(value.pid), value.minutes)
+            if (result.ok) persistKeeps()
+            return json(result)
           },
           scriptNice: async (input: unknown) => {
             const value = input as { pid: number; level?: string }

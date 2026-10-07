@@ -4,7 +4,7 @@
 // 输出: 目标动作 kill | nice | keep | observe + 依据 + 优化建议
 //
 // 分层规则（先匹配先赢）:
-//   R0 server（serve/dev/watch/tail -f/…）           → nice（长驻服务是正当的, 只降优先级）
+//   R0 server（serve/dev/watch/bridge/proxy/tail -f/…）  → nice（长驻服务是正当的, 只降优先级）
 //   R1 memory ≥ memoryKillMB                          → kill（避免 OOM）
 //   R2 cpu ≥ cpuPercent 且非长任务型                   → kill（死循环/高占用脚本）
 //   R3 long-job（build/test/train/install/…）          → nice（正当长任务, 不终止）
@@ -21,7 +21,7 @@ export type ScriptAction = "kill" | "nice" | "keep" | "observe"
 export type CommandKind = "server" | "long-job" | "interactive" | "one-shot" | "unknown"
 
 const SERVER_RE =
-  /(?:^|[\s/\\])(?:serve|server|dev|nodemon|vite|webpack|uvicorn|gunicorn|jupyter|tensorboard|ngrok|pm2|supervisor|mongod|redis-server)\b|next\s+dev|flask\s+run|http\.server|docker\s+compose\s+up|--watch\b|tail\s+-f/i
+  /(?:^|[\s/\\])(?:serve|server|dev|nodemon|vite|webpack|uvicorn|gunicorn|jupyter|tensorboard|ngrok|pm2|supervisor|mongod|redis-server)\b|(?:^|[\s/\\-])(?:bridge|proxy|tunnel)\b|next\s+dev|flask\s+run|http\.server|docker\s+compose\s+up|--watch\b|tail\s+-f/i
 const LONG_JOB_RE =
   /\b(build|compile|test|pytest|jest|vitest|cargo|mvn|gradle|make|install|pip\s+install|conda\s+install|train|finetune|download|wget|curl\s+-O|crawl|scrape|ffmpeg|zip|tar|backup|dump|export|migrate|benchmark|index)\b/i
 const INTERACTIVE_RE = /\b(read\s+-p|pause|less|more|vim|nano|top|htop)\b/i
@@ -62,7 +62,7 @@ export function judgeScript(candidate: ScriptCandidate, options: JudgeOptions): 
 
   // R0: 长驻服务/watch —— 正当, 只降优先级
   if (kind === "server") {
-    reasons.push("长驻型命令（serve/dev/watch）→ 仅降优先级, 不终止")
+    reasons.push("长驻型命令（serve/dev/watch/bridge/proxy）→ 仅降优先级, 不终止")
     suggestions.push("长驻服务可缩小监视范围/降低轮询频率, 或改为按需启动")
     return { action: "nice", severity: "low", kind, reasons, suggestions }
   }

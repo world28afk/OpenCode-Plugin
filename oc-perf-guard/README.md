@@ -20,7 +20,7 @@ shell 工具调用 ──execute.before──► 记录 (sessionID, command, cal
                   └─ 已成孤儿但能匹配到已记录命令（忘了收尾的后台脚本）
                                             ▼
   judgeScript（Laya 式规则, 先匹配先赢）
-    R0 serve/dev/watch/tail -f …            → nice（长驻服务正当, 只降优先级）
+    R0 serve/dev/watch/bridge/proxy/tail -f …  → nice（长驻服务正当, 只降优先级）
     R1 内存 ≥ memoryKillMB                  → kill
     R2 CPU ≥ cpuPercent 且非长任务型         → kill
     R3 build/test/train/install …            → nice（正当长任务）
@@ -32,6 +32,8 @@ shell 工具调用 ──execute.before──► 记录 (sessionID, command, cal
     kill 目标: ① 降到 Idle + 宽限 120s + 通知 → ② 仍未恢复则 taskkill 整树 + 通知
     nice 目标: 降到 Idle + 保留 30min（不再打扰）
     保护: 同 PID 冷却、每小时动作上限、script_keep 可撤销待终止
+          · protect 名单（默认含 oc-web-bridge / bridge.mjs 等常驻桥/代理）永不进入候选
+          · script_keep 持久化到插件 storage → 热载/重启后仍生效（不会被重新判杀）
                                             ▼
   通知: synthetic 消息（+ 可选 notifyPrompt 再补一条 prompt）/ RPC 事件 / TUI
 ```
@@ -85,7 +87,8 @@ shell 工具调用 ──execute.before──► 记录 (sessionID, command, cal
     "actionCooldownMs": 30000,// 同 PID 动作冷却
     "maxActionsPerHour": 10,  // 每小时动作上限
     "askCooldownMs": 600000,  // notify 模式下的通知间隔
-    "notifyPrompt": false     // 除 synthetic 外再尽力发一条 prompt（忙碌时可能不达）
+    "notifyPrompt": false,    // 除 synthetic 外再尽力发一条 prompt（忙碌时可能不达）
+    "protect": []             // 追加保护名单（命令子串）; 默认已含 oc-web-bridge / bridge.mjs
   }
 }
 ```

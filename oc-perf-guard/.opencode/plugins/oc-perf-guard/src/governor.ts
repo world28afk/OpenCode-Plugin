@@ -63,6 +63,8 @@ export interface GovernorDeps {
   readonly maxActionsPerHour?: number
   /** 同 PID 两次动作的最小间隔。 */
   readonly actionCooldownMs?: number
+  /** 跨重启/热载恢复的保留记录（script_keep 持久化; 到期自动失效）。 */
+  readonly keeps?: ReadonlyArray<{ pid: number; until: number }>
 }
 
 export interface ObserveResult {
@@ -81,9 +83,30 @@ export class ScriptGovernor {
   private readonly tracked = new Map<number, TrackedScript>()
   private readonly actions: ActionRecord[] = []
   private readonly now: () => number
+  /** pid → keepUntil: 独立于 tracked 存续, 热载/重检测后仍生效。 */
+  private readonly pendingKeeps = new Map<number, number>()
 
   constructor(private readonly deps: GovernorDeps) {
     this.now = deps.now ?? (() => Date.now())
+    for (const keep of deps.keeps ?? []) {
+      if (keep.until > this.now()) this.pendingKeeps.set(keep.pid, keep.until)
+    }
+  }
+
+  /** 记录一条保留（用于持久化前载入/撤销待终止）。 */
+  seedKeep(pid: number, until: number): void {
+    if (until > this.now()) this.pendingKeeps.set(pid, until)
+  }
+
+  /** 当前有效的保留记录（供持久化）。 */
+  listKeeps(): Array<{ pid: number; until: number }> {
+    const now = this.now()
+    const keeps: Array<{ pid: number; until: number }> = []
+    for (const [pid, until] of this.pendingKeeps) {
+      if (until > now) keeps.push({ pid, until })
+      else this.pendingKeeps.delete(pid)
+    }
+    return keeps
   }
 
   private judgeOptions(): JudgeOptions {
@@ -104,8 +127,15 @@ export class ScriptGovernor {
       const verdict = judgeScript(candidate, this.judgeOptions())
       const existing = this.tracked.get(candidate.pid)
       if (!existing) {
-        this.tracked.set(candidate.pid, { ...candidate, state: "detected", alerts: 1, verdict })
-        alerts.push(candidate)
+        const entry: TrackedScript = { ...candidate, state: "detected", alerts: 1, verdict }
+        // 热载前持久化的 script_keep: 新条目直接进入 kept, 不产生告警/动作
+        const seededUntil = this.pendingKeeps.get(candidate.pid)
+        if (seededUntil !== undefined && seededUntil > now) {
+          entry.state = "kept"
+          entry.keepUntil = seededUntil
+        }
+        this.tracked.set(candidate.pid, entry)
+        if (entry.state !== "kept") alerts.push(candidate)
         continue
       }
       Object.assign(existing, candidate, { alerts: existing.alerts + 1, verdict })
@@ -210,7 +240,7 @@ export class ScriptGovernor {
     return { action: "kill", applied: result.ok, verdict }
   }
 
-  /** 确认保留（撤销待终止）。 */
+  /** 确认保留（撤销待终止; 热载/重检测后仍生效, 直至到期）。 */
   keep(pid: number, minutes?: number): { ok: boolean; until?: number; error?: string } {
     const entry = this.tracked.get(pid)
     if (!entry) return { ok: false, error: `未跟踪的 pid: ${pid}` }
@@ -218,6 +248,7 @@ export class ScriptGovernor {
     entry.state = "kept"
     entry.keepUntil = this.now() + keepMs
     entry.graceUntil = undefined
+    this.pendingKeeps.set(pid, entry.keepUntil)
     return { ok: true, until: entry.keepUntil }
   }
 

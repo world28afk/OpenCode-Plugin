@@ -64,9 +64,28 @@ export interface ScriptCandidate {
 
 const COLLECTOR_RE = /Win32_Process|Get-CimInstance/i
 
+/**
+ * 永不管辖的命令行（大小写不敏感子串匹配）。
+ * 本地桥/代理类常驻工具不属于"脚本残留"：8h 空闲是正常待命,
+ * 规则/热载/实例差异都不应该让它进入候选。可用 options.protect 追加（默认项始终生效）。
+ */
+export const DEFAULT_PROTECT_PATTERNS: readonly string[] = ["oc-web-bridge", "bridge.mjs"]
+
 /** 采集器自身（我们每轮跑的 PowerShell CIM 命令）不参与治理。 */
 export function isCollectorProcess(proc: ProcInfo): boolean {
   return /^(powershell|pwsh)(\.exe)?$/i.test(proc.name) && COLLECTOR_RE.test(proc.cmd)
+}
+
+/** 命中保护名单（bridge/proxy 等常驻工具）→ 永远不参与治理。 */
+export function isProtectedProcess(proc: ProcInfo, protect: readonly string[] = DEFAULT_PROTECT_PATTERNS): boolean {
+  if (!protect.length) return false
+  const haystack = proc.cmd.toLowerCase()
+  if (!haystack) return false
+  for (const pattern of protect) {
+    const needle = pattern.trim().toLowerCase()
+    if (needle && haystack.includes(needle)) return true
+  }
+  return false
 }
 
 /** 两次采样 → 每 PID 的 CPU 占用（单核为 100%; 多线程脚本可超过 100%）。 */
@@ -121,19 +140,23 @@ export interface FindOptions {
   readonly cpu?: ReadonlyMap<number, number>
   readonly thresholds?: ScriptThresholds
   readonly now?: number
+  /** 追加的保护名单（默认 DEFAULT_PROTECT_PATTERNS 始终生效）。 */
+  readonly protect?: readonly string[]
 }
 
-/** 找出需要治理的脚本进程（服务子进程 / 孤儿 + 非 MCP + 非采集器 + 匹配到命令或明显是脚本）。 */
+/** 找出需要治理的脚本进程（服务子进程 / 孤儿 + 非 MCP + 非采集器 + 未受保护 + 匹配到命令或明显是脚本）。 */
 export function findCandidates(procs: readonly ProcInfo[], options: FindOptions = {}): ScriptCandidate[] {
   const thresholds = options.thresholds ?? DEFAULT_SCRIPT_THRESHOLDS
   const now = options.now ?? Date.now()
   const commands = options.commands ?? []
   const cpu = options.cpu ?? new Map<number, number>()
+  const protect = [...DEFAULT_PROTECT_PATTERNS, ...(options.protect ?? [])]
   const out: ScriptCandidate[] = []
 
   for (const proc of procs) {
     if (!isRuntime(proc.name) && !/^(pwsh)(\.exe)?$/i.test(proc.name)) continue
     if (isService(proc.name) || isCollectorProcess(proc)) continue
+    if (isProtectedProcess(proc, protect)) continue // 桥/代理等常驻工具: 永不治理
     if (categoryOf(proc.cmd)) continue // MCP 交给 perf_cleanup
     if (/opencode-cli|opencode\.exe/i.test(proc.cmd)) continue
 
