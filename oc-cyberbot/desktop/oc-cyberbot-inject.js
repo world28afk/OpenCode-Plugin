@@ -589,7 +589,7 @@
       scheduled = false
       apply()
     }
-    if (typeof requestAnimationFrame === "function") requestAnimationFrame(run)
+    if (typeof requestAnimationFrame === "function" && !document.hidden) requestAnimationFrame(run)
     else setTimeout(run, 16)
   }
 
