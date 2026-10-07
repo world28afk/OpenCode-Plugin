@@ -44,6 +44,14 @@ import tempfile
 import time
 from pathlib import Path
 
+# 控制台编码兜底：某些中文 Windows（GBK）控制台无法打印 ✓/✗ 等符号，
+# 若不处理会在输出校验结果时抛 UnicodeEncodeError 中断脚本。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(errors="replace")
+    except Exception:
+        pass
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 INJECT_SUFFIX = "-inject.js"
 BLOCK_SIZE = 4194304  # 与 @electron/asar 的 integrity 分块一致（4 MiB）
