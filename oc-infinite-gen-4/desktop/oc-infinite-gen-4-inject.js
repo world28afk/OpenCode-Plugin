@@ -28,6 +28,52 @@
   const LS_BASE = "oc-infinite-gen-4:serverBase"
   const SHARED_BASE_KEYS = ["oc-deepseek-banlance:serverBase", "oc-deepseek-balance:serverBase"]
   const DESKTOP_PORTS = [49374, 4096, 49375, 49376, 49377, 3001]
+
+  // ---- [oc-inject-fix] 服务源捕获: 直接复用应用自身 /api 请求的 origin, 不依赖端口探测 ----
+  const OC_CAPTURED_ORIGINS = new Set()
+  function ocRecordUrl(value) {
+    try {
+      const url = typeof value === "string" ? value : value && typeof value.url === "string" ? value.url : ""
+      if (!url) return
+      const absolute = new URL(url, location.href)
+      if (!/^https?:$/.test(absolute.protocol)) return
+      if (absolute.pathname.indexOf("/api/") === -1) return
+      OC_CAPTURED_ORIGINS.add(absolute.protocol + "//" + absolute.host)
+    } catch {}
+  }
+  try {
+    const ocNativeFetch = window.fetch
+    if (typeof ocNativeFetch === "function") {
+      window.fetch = function (input, init) {
+        ocRecordUrl(input)
+        return ocNativeFetch.apply(this, arguments)
+      }
+    }
+  } catch {}
+  try {
+    const ocNativeOpen = XMLHttpRequest.prototype.open
+    XMLHttpRequest.prototype.open = function (method, url) {
+      ocRecordUrl(url)
+      return ocNativeOpen.apply(this, arguments)
+    }
+  } catch {}
+  function ocCapturedOrigins() {
+    return Array.from(OC_CAPTURED_ORIGINS)
+  }
+  function ocStorageOrigins() {
+    const found = []
+    try {
+      for (let ocIndex = 0; ocIndex < localStorage.length; ocIndex += 1) {
+        const ocKey = localStorage.key(ocIndex)
+        const ocRaw = ocKey === null ? null : localStorage.getItem(ocKey)
+        if (!ocRaw || ocRaw.length > 20000) continue
+        const ocMatches = ocRaw.match(/https?:\/\/[A-Za-z0-9_.\-]+(?::\d+)?/g)
+        if (ocMatches) for (const ocMatch of ocMatches) found.push(ocMatch)
+      }
+    } catch {}
+    return Array.from(new Set(found))
+  }
+
   const CHECK_MS = 30_000
 
   const state = {
@@ -67,6 +113,8 @@
       if (typeof bootstrap.defaultServerUrl === "string") candidates.push(stripBase(bootstrap.defaultServerUrl))
       if (typeof bootstrap.serverUrl === "string") candidates.push(stripBase(bootstrap.serverUrl))
     }
+    for (const ocBase of ocCapturedOrigins()) candidates.push(stripBase(ocBase))
+    for (const ocBase of ocStorageOrigins()) candidates.push(stripBase(ocBase))
     for (const port of DESKTOP_PORTS) candidates.push(`http://127.0.0.1:${port}`)
 
     const attempt = async (base) => {
@@ -100,6 +148,8 @@
     if (!basePromise) {
       basePromise = (async () => {
         if (/^https?:/.test(location.origin)) return location.origin
+        const ocCaptured = ocCapturedOrigins()[0]
+        if (ocCaptured) return ocCaptured
         if (!isDesktop()) return null
         const base = await probeBase()
         if (!base) basePromise = null
