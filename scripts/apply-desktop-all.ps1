@@ -1,4 +1,4 @@
-# 一次性重打全部桌面注入（关闭一次 → 用根 patcher 全量注入 → 重启一次）
+﻿# 一次性重打全部桌面注入（关闭一次 → 用根 patcher 全量注入 → 重启一次）
 #
 #   powershell -NoProfile -ExecutionPolicy Bypass -File D:\OpenCode-Plugin\scripts\apply-desktop-all.ps1
 #
