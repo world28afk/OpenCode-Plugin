@@ -9,6 +9,7 @@
 | 目录 | 说明 | 类型 |
 | :--- | :--- | :--- |
 | `oc-infinite-gen-4` | 无限四代内核移植 + 桌面徽章 | 服务端 + 桌面注入 |
+| `oc-dsh-purge` | dsh-purge 破甲移植（逐模型可换提示词 + 规则库 + 内置红队技能 + 桌面 dock） | 服务端 + 桌面注入 |
 | `oc-deepseek-banlance` | DeepSeek 余额（上下文圈 + 审查页） | 服务端 + 桌面注入 |
 | `oc-plugin-manager` | 插件管理器（设置页原生开关启用/禁用） | 服务端 + 桌面注入 |
 | `oc-exit` | 彻底退出（Windows 系统托盘图标 + 右键「显示 / 退出」；关闭主窗口收进托盘，退出时结束后台进程） | 服务端 + 主进程注入 |
@@ -25,6 +26,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\sync-plugins.ps1
 node .\oc-plugin-manager\scripts\patch-desktop.mjs          # 插件管理器开关
 node .\oc-exit\scripts\patch-desktop.mjs                    # 右下角退出角标
 node .\oc-infinite-gen-4\scripts\patch-desktop.mjs          # 无限四代徽章
+node .\oc-dsh-purge\scripts\patch-desktop.mjs               # 破甲 dock（输入框上方按钮 + 右侧面板）
 node .\oc-deepseek-banlance\scripts\patch-desktop.mjs       # 余额注入（如有）
 # 或使用各自的 scripts\apply-desktop.ps1（自动关闭→打补丁→重启）
 

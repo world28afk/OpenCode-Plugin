@@ -1,0 +1,51 @@
+{
+  "name": "oc-dsh-purge",
+  "version": "1.1.71",
+  "description": "OpenCode V2 port of dsh-purge (DeepSeek Harness 破甲) — per-model swappable prompt injection, rules library, bundled red-team skills and desktop dock. Upstream: YuJunZhiXue/dsh-purge v1.1.71.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./rpc": "./src/rpc.ts",
+    "./tui": "./src/tui.tsx",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src",
+    "prompts",
+    "index.ts"
+  ],
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "dsh-purge",
+    "purge",
+    "harness-jailbreak",
+    "red-team",
+    "prompt-inject",
+    "rules"
+  ],
+  "license": "MIT",
+  "engines": {
+    "opencode": ">=2.0.0"
+  },
+  "devDependencies": {
+    "@opencode/plugin": "^2.0.22"
+  },
+  "peerDependencies": {
+    "@opentui/core": ">=0.5.14",
+    "@opentui/solid": ">=0.5.14",
+    "solid-js": ">=1.9.0"
+  },
+  "peerDependenciesMeta": {
+    "@opentui/core": {
+      "optional": true
+    },
+    "@opentui/solid": {
+      "optional": true
+    },
+    "solid-js": {
+      "optional": true
+    }
+  }
+}
