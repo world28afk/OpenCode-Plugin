@@ -8,8 +8,8 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { Plugin } from "@opencode/plugin"
-import { mount, PLUGIN_ID, PLUGIN_VERSION } from "../.opencode/plugins/oc-dsh-purge/src/mount"
-import { DEFAULT_PROMPT } from "../.opencode/plugins/oc-dsh-purge/src/prompts"
+import { mount, PLUGIN_ID, PLUGIN_VERSION } from "../.opencode/plugins/oc-purge/src/mount"
+import { DEFAULT_PROMPT } from "../.opencode/plugins/oc-purge/src/prompts"
 
 interface SystemPart {
   type: string
@@ -93,7 +93,7 @@ const systemOf = (hook: HookEntry) => {
   return event.system
 }
 
-describe("oc-dsh-purge mount", () => {
+describe("oc-purge mount", () => {
   test("default: inject hook + 4 purge tools + status RPC + cleanup", async () => {
     const harness = makeContext()
     const cleanup = await mount(harness.ctx)
@@ -188,7 +188,7 @@ describe("oc-dsh-purge mount", () => {
   })
 
   test("purge_skills: install bundled skills to a temp dir", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "oc-dsh-purge-skills-"))
+    const dir = mkdtempSync(join(tmpdir(), "oc-purge-skills-"))
     try {
       const harness = makeContext({ skillsDir: dir })
       await mount(harness.ctx)

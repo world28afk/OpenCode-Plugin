@@ -5,8 +5,8 @@
 //   node scripts/sync-assets.mjs
 //
 // 生成:
-//   .opencode/plugins/oc-dsh-purge/src/prompts.ts   (默认提示词 + 能力协议 + 哈希)
-//   .opencode/plugins/oc-dsh-purge/src/skills.ts    (内置红队技能目录)
+//   .opencode/plugins/oc-purge/src/prompts.ts   (默认提示词 + 能力协议 + 哈希)
+//   .opencode/plugins/oc-purge/src/skills.ts    (内置红队技能目录)
 
 import { createHash } from "node:crypto"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
@@ -15,7 +15,7 @@ import { basename, dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..")
-const plugin = join(root, ".opencode", "plugins", "oc-dsh-purge")
+const plugin = join(root, ".opencode", "plugins", "oc-purge")
 const promptsDir = join(plugin, "prompts")
 const skillsDir = join(root, "skills", "redteam")
 const skillsBundle = join(root, "skills", "redteam.bundle.json.gz")
@@ -32,7 +32,7 @@ const capabilityRaw = read(join(promptsDir, "capability-protocol.md"))
 const sections = { official: "", redteamLead: "", redteamChild: "" }
 {
   const labels = { "redteam-lead": "redteamLead", "redteam-child": "redteamChild" }
-  const parts = capabilityRaw.split(/\n?<!--\s*oc-dsh-purge:\s*section=([a-z-]+)\s*-->\n?/)
+  const parts = capabilityRaw.split(/\n?<!--\s*oc-purge:\s*section=([a-z-]+)\s*-->\n?/)
   // parts = [preamble, label, body, label, body, ...]
   for (let i = 1; i < parts.length; i += 2) {
     const key = labels[parts[i]] || "official"

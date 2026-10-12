@@ -1,7 +1,7 @@
 // RPC 契约 — 服务端注册后客户端可经 HTTP 调用:
 //   POST /api/rpc/dsh.purge.status/get   {} → 状态元数据 (含注入开关/规则/技能)
 //
-// 供桌面 dock (desktop/oc-dsh-purge-dock.js) / TUI / 第三方客户端确认插件运行状态。
+// 供桌面 dock (desktop/oc-purge-dock.js) / TUI / 第三方客户端确认插件运行状态。
 // 注意: rpcID 使用点号分隔 (URL 路径段不能包含 "/")。
 // Rpc.define 只是 identity 辅助, 这里用纯对象定义以保持运行时零外部依赖。
 

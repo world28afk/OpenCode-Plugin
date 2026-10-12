@@ -12,7 +12,7 @@
 //   strict          : 只用用户文本; 没有就不注入 (丢弃内置默认)
 //   always          : 用户文本之后**再追加**内置默认
 
-export const PLUGIN_ID = "oc-dsh-purge"
+export const PLUGIN_ID = "oc-purge"
 
 /** 上游 GLOBAL_PROMPT_ORDER = -100000 (越靠前越优先)。 */
 export const GLOBAL_PROMPT_ORDER = -100_000

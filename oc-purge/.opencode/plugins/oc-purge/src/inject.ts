@@ -68,7 +68,7 @@ export interface BuildInjectOptions {
 /** 生成本次模型调用要追加的 system 段列表。 */
 export function buildSystemParts(options: BuildInjectOptions): SystemTextPart[] {
   const { state, resolved } = options
-  const pluginID = options.pluginID ?? "oc-dsh-purge"
+  const pluginID = options.pluginID ?? "oc-purge"
   if (!state.enabled) return []
 
   const parts: SystemTextPart[] = []

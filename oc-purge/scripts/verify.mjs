@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 确定性回归校验 — oc-dsh-purge (OpenCode 移植版)。
+// 确定性回归校验 — oc-purge (OpenCode 移植版)。
 //
 //   bun scripts/verify.mjs        # 推荐 (bun 原生解析 TS 模块)
 //   node scripts/verify.mjs       # 检测到 bun 时自动以 bun 重新执行
@@ -15,7 +15,7 @@ import { dirname, join } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..")
-const pluginRoot = join(root, ".opencode", "plugins", "oc-dsh-purge")
+const pluginRoot = join(root, ".opencode", "plugins", "oc-purge")
 const srcRoot = join(pluginRoot, "src")
 const runningUnderBun = typeof globalThis.Bun !== "undefined"
 
@@ -90,7 +90,7 @@ if (!runningUnderBun) {
   const labels = { "redteam-lead": "redteamLead", "redteam-child": "redteamChild" }
   const parsed = {}
   {
-    const parts = capabilityRaw.split(/\n?<!--\s*oc-dsh-purge:\s*section=([a-z-]+)\s*-->\n?/)
+    const parts = capabilityRaw.split(/\n?<!--\s*oc-purge:\s*section=([a-z-]+)\s*-->\n?/)
     for (let i = 1; i < parts.length; i += 2) parsed[labels[parts[i]] || "official"] = (parts[i + 1] || "").trim()
   }
   check(
@@ -182,13 +182,13 @@ if (runningUnderBun) {
 
 // ── 6. 脚本语法（node --check 不支持 ESM import；用 bun build 兜底） ────────
 if (runningUnderBun) {
-  for (const file of ["scripts/sync-assets.mjs", "scripts/patch-desktop.mjs", "desktop/oc-dsh-purge-dock.js"]) {
+  for (const file of ["scripts/sync-assets.mjs", "scripts/patch-desktop.mjs", "desktop/oc-purge-dock.js"]) {
     const build = runBun(["build", join(root, file), "--target", "bun"], { stdio: "pipe" })
     check(`${file} 语法通过`, build.status === 0)
   }
 } else {
-  const a = spawnSync(`node --check ${quoteForShell(join(root, "desktop", "oc-dsh-purge-dock.js"))}`, { shell: true, encoding: "utf8" })
-  check("desktop/oc-dsh-purge-dock.js 语法通过 (node --check)", a.status === 0)
+  const a = spawnSync(`node --check ${quoteForShell(join(root, "desktop", "oc-purge-dock.js"))}`, { shell: true, encoding: "utf8" })
+  check("desktop/oc-purge-dock.js 语法通过 (node --check)", a.status === 0)
 }
 
 // ── 7. 端到端冒烟 (bun test) ─────────────────────────────────────────────────

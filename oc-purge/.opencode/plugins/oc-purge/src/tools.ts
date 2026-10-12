@@ -43,7 +43,7 @@ export function buildTools(controller: PurgeController): ToolDefinition[] {
     {
       name: "purge_status",
       description:
-        "Return oc-dsh-purge runtime status: injection slot state, resolved prompt source, " +
+        "Return oc-purge runtime status: injection slot state, resolved prompt source, " +
         "active rule, workspace policy, bundled red-team skills and host capabilities.",
       input: { type: "object", properties: {}, additionalProperties: false },
       execute: async () => json(controller.profile()),

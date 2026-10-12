@@ -1,9 +1,9 @@
 /** @jsxImportSource @opentui/solid */
-// oc-dsh-purge — OpenCode TUI 插件半体 (上游 client.js dock 的等价面之一)。
+// oc-purge — OpenCode TUI 插件半体 (上游 client.js dock 的等价面之一)。
 //
 // 上游: 会话标题旁 "dsh-purge" 按钮 + 右侧 dock (Clean / Drill 两页)。
 // 移植: prompt.footer.status 槽位状态条 + 服务端 RPC 拉取状态;
-// 完整面板走桌面端 DOM 注入 (desktop/oc-dsh-purge-dock.js)。
+// 完整面板走桌面端 DOM 注入 (desktop/oc-purge-dock.js)。
 //
 // 服务端注入不依赖本文件; 该半体仅提供状态条展示。
 
@@ -72,7 +72,7 @@ function PurgeBadge() {
 }
 
 export default Plugin.define({
-  id: "oc-dsh-purge.tui",
+  id: "oc-purge.tui",
   setup(context) {
     return context.ui.slot({
       append: "prompt.footer.status",

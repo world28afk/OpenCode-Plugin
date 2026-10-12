@@ -18,7 +18,7 @@ export function buildProfile(input: ProfileInput): Record<string, unknown> {
   const activeRule = state.activeRule ? state.rules.find((rule) => rule.id === state.activeRule) : undefined
   const live = input.injectActive && state.enabled
   return {
-    plugin: "oc-dsh-purge",
+    plugin: "oc-purge",
     pluginVersion: input.version,
     pluginDisplayName: "破甲 dsh-purge (OpenCode 移植版)",
     upstream: {
@@ -37,7 +37,7 @@ export function buildProfile(input: ProfileInput): Record<string, unknown> {
       "PurgeTools: purge_status / purge_inject / purge_rules / purge_skills",
       "PurgeRpc: POST /api/rpc/dsh.purge.status/get（桌面 dock 数据源）",
       "BundledSkills: skills/redteam/*.md 内置并可按需导出到 .opencode/skills/",
-      "DesktopDock: 会话标题旁破甲面板（desktop/oc-dsh-purge-dock.js）",
+      "DesktopDock: 会话标题旁破甲面板（desktop/oc-purge-dock.js）",
       "Removed: 宿主补丁 / cordis.patch.yml / patcher.js（V2 无此面，卸载即净）",
     ],
     enabled: state.enabled,

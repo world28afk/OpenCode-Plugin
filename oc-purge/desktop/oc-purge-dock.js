@@ -1,5 +1,5 @@
 /**
- * oc-dsh-purge — Desktop dock injector（会话输入框上方的「破甲」按钮 + 右侧面板）
+ * oc-purge — Desktop dock injector（会话输入框上方的「破甲」按钮 + 右侧面板）
  *
  * 上游: dsh-purge 的 client.js 在会话标题旁挂 "dsh-purge" 按钮, 打开右侧 dock
  * （Clean / Drill 两页）。OpenCode 桌面/Web 无官方 UI 插件接口, 因此改为 DOM 注入。
@@ -21,12 +21,12 @@
 ;(() => {
   "use strict"
 
-  if (window.__ocDshPurgeDock) return
+  if (window.__ocPurgeDock) return
 
   const VERSION = "1.1.71"
   const RPC_ID = "dsh.purge.status"
-  const MARK = "data-oc-dsh-purge"
-  const LS_BASE = "oc-dsh-purge:serverBase"
+  const MARK = "data-oc-purge"
+  const LS_BASE = "oc-purge:serverBase"
   const SHARED_BASE_KEYS = ["oc-infinite-gen-4:serverBase", "oc-deepseek-banlance:serverBase"]
   const DESKTOP_PORTS = [49374, 4096, 49375, 49376, 49377, 3001]
   const CHECK_MS = 30_000
@@ -385,8 +385,8 @@
   let timer = null
   loop()
 
-  window.__ocDshPurgeDock = true
-  window.ocDshPurgeDock = {
+  window.__ocPurgeDock = true
+  window.ocPurgeDock = {
     version: VERSION,
     state,
     refresh: () => refresh(),
@@ -411,10 +411,10 @@
       if (timer) clearTimeout(timer)
       observer.disconnect()
       for (const node of document.querySelectorAll(`[${MARK}]`)) node.remove()
-      delete window.ocDshPurgeDock
-      delete window.__ocDshPurgeDock
+      delete window.ocPurgeDock
+      delete window.__ocPurgeDock
     },
   }
 
-  console.info(`[oc-dsh-purge] v${VERSION} dock 已注入（输入框上方「破甲」按钮）。`)
+  console.info(`[oc-purge] v${VERSION} dock 已注入（输入框上方「破甲」按钮）。`)
 })()

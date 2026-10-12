@@ -1,4 +1,4 @@
-# oc-dsh-purge
+# oc-purge
 
 **dsh-purge → OpenCode V2 插件移植版**（上游： [`YuJunZhiXue/dsh-purge`](https://github.com/YuJunZhiXue/dsh-purge) v1.1.71，MIT）
 
@@ -15,8 +15,8 @@
 ## 目录结构
 
 ```
-oc-dsh-purge/
-├── .opencode/plugins/oc-dsh-purge/     # 插件包（OpenCode V2 自动发现）
+oc-purge/
+├── .opencode/plugins/oc-purge/     # 插件包（OpenCode V2 自动发现）
 │   ├── package.json                    # exports "." → src/index.ts；"./tui" → src/tui.tsx
 │   ├── index.ts                        # 目录解析兜底入口
 │   ├── prompts/
@@ -36,7 +36,7 @@ oc-dsh-purge/
 ├── skills/redteam.bundle.json.gz       # 技能资产包（压缩, 权威来源; 防终端安全软件误删明文）
 ├── presets/redteam/*                   # 上游红队预设（逐字保留）
 ├── docs/drill-auth-legal.html          # 上游 Drill 授权与法律声明（逐字保留）
-├── desktop/oc-dsh-purge-dock.js        # 桌面/Web DOM 注入（输入框上方「⚔ 破甲」+ 右侧面板）
+├── desktop/oc-purge-dock.js        # 桌面/Web DOM 注入（输入框上方「⚔ 破甲」+ 右侧面板）
 ├── scripts/
 │   ├── sync-assets.mjs                 # 资产 → 内联 TS 模块（prompts.ts / skills.ts）
 │   ├── patch-desktop.mjs               # app.asar 注入工具（--dry-run/--unpatch/--restore）
@@ -56,7 +56,7 @@ oc-dsh-purge/
 | `prompt-inject.md` + `rules/` + workspace policy（落盘 `$DSH_HOME`） | 插件私有 `ctx.storage`（customText / activeRule / rules / policy） |
 | `lib/redteam` HTTP 桥 `POST /redteam/api` | `ctx.rpc.register("dsh.purge.status")` → `get` / `set` |
 | `skills/redteam/*.md` 导入官方 skills 目录 | 内置资产 + `purge_skills` 工具导出到 `<项目>/.opencode/skills/` |
-| `client.js`（会话标题旁 dock） | `src/tui.tsx`（TUI）+ `desktop/oc-dsh-purge-dock.js`（桌面 DOM 注入） |
+| `client.js`（会话标题旁 dock） | `src/tui.tsx`（TUI）+ `desktop/oc-purge-dock.js`（桌面 DOM 注入） |
 | `cordis.patch.yml` + `scripts/lib/patcher.js`（改宿主文件） | **整节删除**：V2 无宿主补丁面，hook 每次请求生效，卸载即净 |
 | `{{cwd}}` 等 DSH 模板转义 | **删除**：OpenCode 无模板层，原文注入 |
 
@@ -70,8 +70,8 @@ oc-dsh-purge/
 powershell -NoProfile -ExecutionPolicy Bypass -File .\sync-plugins.ps1
 
 # 2) 桌面 dock 注入（可选；各插件独立）
-node .\oc-dsh-purge\scripts\patch-desktop.mjs --dry-run
-node .\oc-dsh-purge\scripts\patch-desktop.mjs
+node .\oc-purge\scripts\patch-desktop.mjs --dry-run
+node .\oc-purge\scripts\patch-desktop.mjs
 ```
 
 ## 配置（插件选项）
@@ -111,7 +111,7 @@ bun test scripts/smoke.test.ts
 
 ## 许可与署名
 
-- 上游 `dsh-purge` © YuJunZhiXue，**MIT License**（见 `LICENSE`、`.opencode/plugins/oc-dsh-purge/LICENSE`）。
+- 上游 `dsh-purge` © YuJunZhiXue，**MIT License**（见 `LICENSE`、`.opencode/plugins/oc-purge/LICENSE`）。
 - 本移植保留上游署名与来源仓库；默认提示词、能力协议、红队技能、红队预设、Drill 授权声明
   **逐字保留**并由 `scripts/verify.mjs` 做 SHA256 校验。
 - 红队技能以 `skills/redteam.bundle.json.gz` 为权威压缩资产（防终端安全软件误删明文 md）；

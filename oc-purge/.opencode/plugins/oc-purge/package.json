@@ -1,5 +1,5 @@
 {
-  "name": "oc-dsh-purge",
+  "name": "oc-purge",
   "version": "1.1.71",
   "description": "OpenCode V2 port of dsh-purge (DeepSeek Harness 破甲) — per-model swappable prompt injection, rules library, bundled red-team skills and desktop dock. Upstream: YuJunZhiXue/dsh-purge v1.1.71.",
   "type": "module",

@@ -19,7 +19,7 @@ import { DshPurgeStatus } from "./rpc"
 import { buildTools, type PurgeController } from "./tools"
 import { DEFAULT_PROMPT } from "./prompts"
 
-export const PLUGIN_ID = "oc-dsh-purge"
+export const PLUGIN_ID = "oc-purge"
 export const PLUGIN_VERSION = "1.1.71"
 
 const STORAGE_KEY = "state"
@@ -39,7 +39,7 @@ const HOST_FEATURES = [
   "Purge RPC: POST /api/rpc/dsh.purge.status/get（桌面 dock 数据源，等价 /redteam/api 桥）",
   "Bundled Skills: skills/redteam/*.md 内置，可导出到 <项目>/.opencode/skills/",
   "TUI Badge: prompt.footer.status 状态条（src/tui.tsx）",
-  "Desktop Dock: 会话标题旁破甲面板（desktop/oc-dsh-purge-dock.js）",
+  "Desktop Dock: 会话标题旁破甲面板（desktop/oc-purge-dock.js）",
   "No Host Patch: 删除 cordis.patch.yml / patcher.js，卸载即净",
 ]
 
@@ -65,7 +65,7 @@ export async function mount(ctx: Plugin.Context): Promise<Cleanup> {
       const raw = await (ctx.storage as { get: (key: string) => Promise<unknown> }).get(STORAGE_KEY)
       if (raw !== undefined && raw !== null) state = normalizeState(raw)
     } catch (error) {
-      console.warn("[oc-dsh-purge] state load failed:", message(error))
+      console.warn("[oc-purge] state load failed:", message(error))
     }
   }
 
@@ -74,7 +74,7 @@ export async function mount(ctx: Plugin.Context): Promise<Cleanup> {
     try {
       await (ctx.storage as { set: (key: string, value: unknown) => Promise<void> }).set(STORAGE_KEY, state)
     } catch (error) {
-      console.warn("[oc-dsh-purge] state persist failed:", message(error))
+      console.warn("[oc-purge] state persist failed:", message(error))
     }
   }
 
@@ -119,7 +119,7 @@ export async function mount(ctx: Plugin.Context): Promise<Cleanup> {
           writeFileSync(join(folder, "SKILL.md"), skill.content, "utf8")
           installed.push(skill.id)
         } catch (error) {
-          console.warn(`[oc-dsh-purge] skill install failed (${skill.id}):`, message(error))
+          console.warn(`[oc-purge] skill install failed (${skill.id}):`, message(error))
         }
       }
       return { installed, targetDir: dir }
@@ -174,12 +174,12 @@ export async function mount(ctx: Plugin.Context): Promise<Cleanup> {
       })
       if (registration) registrations.push(registration as unknown as { dispose: () => Promise<void> | void })
     } catch (error) {
-      console.warn("[oc-dsh-purge] status RPC registration failed:", message(error))
+      console.warn("[oc-purge] status RPC registration failed:", message(error))
     }
   }
 
   // ── 4. 解析器导出（供注入脚本/工具读取同一份契约） ─────────────────────
-  ;(globalThis as Record<string, unknown>).__ocDshPurgeResolveInject = (raw: unknown) =>
+  ;(globalThis as Record<string, unknown>).__ocPurgeResolveInject = (raw: unknown) =>
     resolveInjectText(normalizeState(raw), DEFAULT_PROMPT)
 
   return async () => {
@@ -187,7 +187,7 @@ export async function mount(ctx: Plugin.Context): Promise<Cleanup> {
       try {
         await registration.dispose()
       } catch (error) {
-        console.warn("[oc-dsh-purge] dispose failed:", message(error))
+        console.warn("[oc-purge] dispose failed:", message(error))
       }
     }
   }

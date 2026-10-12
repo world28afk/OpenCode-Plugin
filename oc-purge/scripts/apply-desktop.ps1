@@ -1,12 +1,12 @@
-# oc-dsh-purge 桌面端自动应用（关闭 → 打补丁 → 重启）
+# oc-purge 桌面端自动应用（关闭 → 打补丁 → 重启）
 # 仅使用本插件自己的 scripts/patch-desktop.mjs；与其它插件的注入互不影响。
 $ErrorActionPreference = "Stop"
-$log = Join-Path $env:TEMP "oc-dsh-purge-desktop.log"
+$log = Join-Path $env:TEMP "oc-purge-desktop.log"
 function Log($m) { "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $m" | Add-Content -Path $log -Encoding UTF8 }
 
 $appDir = "C:\Users\Administrator\AppData\Local\Programs\@opencodedesktop"
 $exe = Join-Path $appDir "OpenCode.exe"
-$repo = "D:\OpenCode-Plugin\oc-dsh-purge"
+$repo = "D:\OpenCode-Plugin\oc-purge"
 
 try {
   Log "start; waiting 25s"

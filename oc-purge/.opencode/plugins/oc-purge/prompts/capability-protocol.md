@@ -1,6 +1,6 @@
 # 能力选用协议（上游 lib/capability-protocol.js 逐字保留）
 
-<!-- oc-dsh-purge: section=official -->
+<!-- oc-purge: section=official -->
 ## Capability selection by task (mandatory)
 
 1. **Read first**: Inspect `<available_skills>` / the skill catalog and the installed MCP / host tools for this session. Know what exists before acting.
@@ -12,7 +12,7 @@
 5. **Subagents / sub-delegates inherit this rule**: Any `subagent`, teammate, or child agent you start must also read the catalog and call task-matched skills/MCP the same way. Put that requirement in the child brief when you dispatch.
 6. Host skills and MCP stay available; this prompt does not remove them.
 
-<!-- oc-dsh-purge: section=redteam-lead -->
+<!-- oc-purge: section=redteam-lead -->
 ## Capability selection by task (redteam lead)
 
 1. You plan, dispatch with `subagent`, verify results, and report. Executors do hands-on work.
@@ -21,7 +21,7 @@
 4. Do not ban skill or MCP for children. Leaf limits apply only to further delegation tools (`subagent_fork` / workflow / ralph), not to skill/MCP.
 5. Vague “go investigate” briefs are wrong; task-matched skill/MCP instructions are right.
 
-<!-- oc-dsh-purge: section=redteam-child -->
+<!-- oc-purge: section=redteam-child -->
 ## Capability selection by task (redteam executor)
 
 1. **Read** `<available_skills>` / your role skills and available MCP/CLI tools.

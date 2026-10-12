@@ -11,5 +11,5 @@
     "jsx": "preserve",
     "jsxImportSource": "@opentui/solid"
   },
-  "include": [".opencode/plugins/oc-dsh-purge/src", ".opencode/plugins/oc-dsh-purge/index.ts"]
+  "include": [".opencode/plugins/oc-purge/src", ".opencode/plugins/oc-purge/index.ts"]
 }

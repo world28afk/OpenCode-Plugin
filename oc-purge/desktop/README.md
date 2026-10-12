@@ -1,4 +1,4 @@
-# oc-dsh-purge 桌面端注入（dock）
+# oc-purge 桌面端注入（dock）
 
 上游 dsh-purge 的 `client.js` 在**会话标题旁**挂一个 “dsh-purge” 按钮，点开右侧 dock
 （Clean / Drill 两页）。OpenCode Desktop/Web 没有官方 UI 插件接口，因此本插件用
@@ -22,8 +22,8 @@ POST {base}/api/rpc/dsh.purge.status/set   {"input":{...}}
 ## 用法
 
 ```powershell
-# 1) 只在控制台试用（刷新即失效）: Ctrl+Shift+I → Console → 粘贴 desktop/oc-dsh-purge-dock.js
-# 2) 持久化（写进 app.asar，自动备份 app.asar.oc-dsh-purge.bak）
+# 1) 只在控制台试用（刷新即失效）: Ctrl+Shift+I → Console → 粘贴 desktop/oc-purge-dock.js
+# 2) 持久化（写进 app.asar，自动备份 app.asar.oc-purge.bak）
 node scripts/patch-desktop.mjs --dry-run      # 先验证（不改动安装）
 node scripts/patch-desktop.mjs                # 注入（需先完全退出桌面端）
 node scripts/patch-desktop.mjs --unpatch      # 只移除本插件内容

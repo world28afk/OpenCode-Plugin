@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// oc-dsh-purge 桌面端注入工具（独立于其它插件, 只处理本插件的文件与标签）。
+// oc-purge 桌面端注入工具（独立于其它插件, 只处理本插件的文件与标签）。
 //
 //   node scripts/patch-desktop.mjs --dry-run     # 只做提取+打包验证到临时文件, 不改动安装
 //   node scripts/patch-desktop.mjs               # 注入 (默认目标: OpenCode Desktop 安装目录)
@@ -11,7 +11,7 @@
 // 说明:
 //   • 每个插件独立注入: 提取当前 asar → 只添加本插件的脚本文件与 <script> 标签 → 回写
 //   • 幂等: 重复执行安全; 与其它插件的注入共存互不影响
-//   • 首次注入前自动备份 app.asar → app.asar.oc-dsh-purge.bak
+//   • 首次注入前自动备份 app.asar → app.asar.oc-purge.bak
 //   • 与其它插件卸载互不影响: --unpatch 只移除本插件的内容
 
 import { spawnSync } from "node:child_process"
@@ -21,8 +21,8 @@ import { dirname, join, relative } from "node:path"
 import { fileURLToPath } from "node:url"
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..")
-const injectSource = join(root, "desktop", "oc-dsh-purge-dock.js")
-const injectName = "oc-dsh-purge-dock.js"
+const injectSource = join(root, "desktop", "oc-purge-dock.js")
+const injectName = "oc-purge-dock.js"
 const defaultApp = join(
   process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local"),
   "Programs",
@@ -46,7 +46,7 @@ const fail = (message) => {
 
 if (!existsSync(appPath)) fail(`找不到 app.asar: ${appPath}（可用 --app <路径> 指定）`)
 
-const backupPath = `${appPath}.oc-dsh-purge.bak`
+const backupPath = `${appPath}.oc-purge.bak`
 const quote = (value) => (/[\s"&|<>^()]/.test(value) ? `"${value.replace(/"/g, '\\"')}"` : value)
 const run = (command, commandArgs) => {
   const line = [command, ...commandArgs].map(quote).join(" ")
@@ -77,8 +77,8 @@ if (unpatch && !existsSync(injectSource)) {
   fail(`缺少注入脚本: ${injectSource}`)
 }
 
-const workDir = join(tmpdir(), `oc-dsh-purge-asar-${Date.now()}`)
-const packTarget = dryRun ? join(tmpdir(), `oc-dsh-purge-test-${Date.now()}.asar`) : appPath
+const workDir = join(tmpdir(), `oc-purge-asar-${Date.now()}`)
+const packTarget = dryRun ? join(tmpdir(), `oc-purge-test-${Date.now()}.asar`) : appPath
 
 console.log(`app.asar : ${appPath}`)
 console.log(`模式      : ${dryRun ? "dry-run（不改动安装）" : unpatch ? "移除本插件注入" : "注入"}`)
