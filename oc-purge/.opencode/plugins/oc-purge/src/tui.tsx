@@ -34,8 +34,8 @@ function PurgeBadge() {
     try {
       const client = context.client as { rpc?: (definition: unknown) => { get: (input: object) => Promise<PurgeSnapshot> } }
       if (typeof client?.rpc !== "function") return
-      const { DshPurgeStatus } = await import("./rpc")
-      const result = await client.rpc(DshPurgeStatus).get({})
+      const { PurgeStatus } = await import("./rpc")
+      const result = await client.rpc(PurgeStatus).get({})
       if (result && typeof result === "object") setSnapshot(result)
     } catch {
       // RPC 不可用 (旧运行时 / location 未就绪) 时保持静态徽章

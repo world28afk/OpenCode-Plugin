@@ -6,17 +6,16 @@
 
 ## 效果
 
-- 输入框上方一枚 **「⚔ 破甲」** 按钮（状态点：绿=运行中 / 灰=未连接 / 黄=检测中）。
-- 点开右侧面板：
-  - 运行状态、提示词来源、策略、能力协议、规则集数量、内置技能数量、注入槽位。
-  - 操作：停用/开启注入、切换策略（fallback / strict / always）、能力协议开关。
-  - 文本框：自定义注入正文（等价上游 `prompt-inject.md`），保存 / 清空。
-  - 底部列出内置红队技能 id。
+- 输入框上方一枚 **「⚔ 破甲」** 按钮（运行中 / 未连接）。
+- 点开右侧面板（**Clean / Drill 双页**，**Light / Ink** 主题，首启告知 + Drill 三勾选授权门）：
+  - Clean：注入状态、提示词来源、策略、能力协议、规则集、自己的服务器、本地规则、技能；
+    操作 应用 / 复原 / 停用注入；提示词编辑器；规则库（启用/删除/新建）；Own servers；
+    CWD rules 扫描勾选；技能导出/导入/新建。
+  - Drill：授权后展示内置红队技能、已装技能、靶标白名单与上游 Drill 授权声明入口。
 
-面板数据来自服务端插件 RPC：
+面板数据与写面全部来自服务端插件 RPC：
 ```
-POST {base}/api/rpc/dsh.purge.status/get   {"input":{}}
-POST {base}/api/rpc/dsh.purge.status/set   {"input":{...}}
+POST {base}/api/rpc/purge.status/{get|set|apply|revert|rules|skills|servers|cwd}
 ```
 
 ## 用法

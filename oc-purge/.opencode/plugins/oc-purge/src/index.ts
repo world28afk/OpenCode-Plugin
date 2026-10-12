@@ -18,6 +18,6 @@ import type { Plugin } from "@opencode/plugin"
 import { mount, PLUGIN_ID } from "./mount"
 
 export { PLUGIN_ID, PLUGIN_VERSION } from "./mount"
-export { DshPurgeStatus, RPC_ID } from "./rpc"
+export { PurgeStatus, RPC_ID } from "./rpc"
 
 export default { id: PLUGIN_ID, setup: mount } satisfies Plugin.Plugin

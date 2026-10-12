@@ -46,6 +46,12 @@ export interface PurgeState {
   readonly capabilityProtocol: boolean
   readonly postPrompt: string
   readonly postPromptOrder: number
+  /** 等价 $DSH_HOME/net-scope-allow.txt: 「自己的服务器」白名单原文（已规范化）。 */
+  readonly serversText: string
+  /** 勾选的本地指令文件绝对路径（CWD rules）。 */
+  readonly cwdSelections: readonly string[]
+  /** 首次使用告知是否已确认（等价上游 welcome notice）。 */
+  readonly noticeAck: boolean
 }
 
 export const DEFAULT_STATE: PurgeState = {
@@ -57,6 +63,9 @@ export const DEFAULT_STATE: PurgeState = {
   capabilityProtocol: true,
   postPrompt: "",
   postPromptOrder: DEFAULT_POST_PROMPT_ORDER,
+  serversText: "",
+  cwdSelections: [],
+  noticeAck: false,
 }
 
 function asText(value: unknown): string | null {
@@ -81,6 +90,20 @@ function normalizeRules(raw: unknown): PurgeRule[] {
   return out
 }
 
+function normalizeSelections(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return []
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const item of raw) {
+    if (typeof item !== "string") continue
+    const trimmed = item.trim()
+    if (!trimmed || seen.has(trimmed)) continue
+    seen.add(trimmed)
+    out.push(trimmed)
+  }
+  return out
+}
+
 /** 把任意持久化数据规整成合法状态（缺字段回退默认）。 */
 export function normalizeState(raw: unknown): PurgeState {
   const input = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {}
@@ -100,6 +123,9 @@ export function normalizeState(raw: unknown): PurgeState {
     capabilityProtocol: input.capabilityProtocol === false ? false : true,
     postPrompt: typeof input.postPrompt === "string" ? input.postPrompt : "",
     postPromptOrder: order,
+    serversText: typeof input.serversText === "string" ? input.serversText : "",
+    cwdSelections: normalizeSelections(input.cwdSelections),
+    noticeAck: input.noticeAck === true,
   }
 }
 
@@ -107,19 +133,27 @@ export interface ResolvedInject {
   /** 实际要注入的正文（可能为空字符串 = 本次不注入）。 */
   readonly text: string
   /** 来源标记, 便于审计/profile。 */
-  readonly source: "custom" | "rule" | "default" | "always" | "none"
+  readonly source: "custom" | "rule" | "cwd" | "default" | "always" | "none"
 }
 
 /**
- * 解析本次要注入的正文。defaultText 是内置默认提示词（由 src/prompts.ts 提供）。
- * 与上游注入决策（A 用户文本 → B 本地 md → D 插件默认 + C 策略）等价。
+ * 解析本次要注入的正文。defaultText 是内置默认提示词（由 src/prompts.ts 提供），
+ * cwdText 是勾选的本地规则文件内容（CWD rules）。
+ * 与上游注入决策等价: A 用户文本(prompt-inject/规则集) → B 本地 md → D 插件默认 (+ 策略)。
  */
-export function resolveInjectText(state: PurgeState, defaultText: string): ResolvedInject {
+export function resolveInjectText(state: PurgeState, defaultText: string, cwdText = ""): ResolvedInject {
   const rule = state.activeRule ? state.rules.find((item) => item.id === state.activeRule) : undefined
-  const user = asText(state.customText) ?? asText(rule?.content)
+  const user = asText(state.customText) ?? asText(rule?.content) ?? asText(cwdText)
+  const source: ResolvedInject["source"] = state.customText
+    ? "custom"
+    : asText(rule?.content)
+      ? "rule"
+      : asText(cwdText)
+        ? "cwd"
+        : "none"
 
   if (state.policy === "strict") {
-    if (user) return { text: user, source: state.customText ? "custom" : "rule" }
+    if (user) return { text: user, source }
     return { text: "", source: "none" }
   }
 
@@ -128,6 +162,6 @@ export function resolveInjectText(state: PurgeState, defaultText: string): Resol
     return { text: merged, source: "always" }
   }
 
-  if (user) return { text: user, source: state.customText ? "custom" : "rule" }
+  if (user) return { text: user, source }
   return { text: defaultText, source: "default" }
 }

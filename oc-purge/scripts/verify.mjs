@@ -146,6 +146,36 @@ if (!runningUnderBun) {
     String(parts[0]?.metadata?.order),
   )
   check("buildSystemParts: 能力协议段 order = -99999", parts[1]?.metadata?.order === config.CAPABILITY_ORDER)
+
+  // 纯函数: own servers 规范化（上游 net-scope.js 行为）
+  const netScope = await import(pathToFileURL(join(srcRoot, "netScope.ts")).href)
+  check("netScope.entryHost: 单 IP 保留", netScope.entryHost("203.0.113.10") === "203.0.113.10")
+  check("netScope.entryHost: 主机名保留", netScope.entryHost("my-vps.example.com") === "my-vps.example.com")
+  check("netScope.entryHost: user@host 去账号", netScope.entryHost("alice@my-vps.example.com") === "my-vps.example.com")
+  check("netScope.entryHost: 网段丢弃", netScope.entryHost("10.0.0.0/8") === "")
+  check("netScope.entryHost: 通配符丢弃", netScope.entryHost("*.evil.com") === "")
+  check("netScope.entryHost: 私钥丢弃", netScope.entryHost("-----BEGIN OPENSSH PRIVATE KEY-----") === "")
+  const allow = netScope.normalizeAllowText("203.0.113.10\n10.0.0.0/8\nmy-vps.example.com\n")
+  check("netScope.normalizeAllowText: dropped=1 且仅保留合法主机", allow.dropped === 1 && allow.hosts.length === 2)
+
+  // 工具/RPC 契约
+  const tools = await import(pathToFileURL(join(srcRoot, "tools.ts")).href)
+  const rpc = await import(pathToFileURL(join(srcRoot, "rpc.ts")).href)
+  check("rpc.ts RPC_ID = purge.status", rpc.RPC_ID === "purge.status", rpc.RPC_ID)
+  check(
+    "rpc.ts 方法齐全",
+    ["get", "set", "apply", "revert", "rules", "skills", "servers", "cwd"].every((m) => Boolean(rpc.PurgeStatus.methods[m])),
+  )
+  {
+    const list = tools.buildTools({}).map((tool) => tool.name)
+    check(
+      "tools.ts 工具集齐全",
+      ["purge_status", "purge_apply", "purge_revert", "purge_inject", "purge_rules", "purge_skills", "purge_servers", "purge_cwd"].every(
+        (name) => list.includes(name),
+      ),
+      list.join(","),
+    )
+  }
 }
 
 // ── 3. 源码静态检查 ──────────────────────────────────────────────────────────

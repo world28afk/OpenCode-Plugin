@@ -11,6 +11,9 @@ export interface ProfileInput {
   readonly resolved: ResolvedInject
   readonly hostFeatures: readonly string[]
   readonly injectActive: boolean
+  readonly installedSkills?: readonly string[]
+  readonly servers?: readonly string[]
+  readonly cwd?: readonly { path: string; scope: string; size: number }[]
 }
 
 export function buildProfile(input: ProfileInput): Record<string, unknown> {
@@ -71,9 +74,21 @@ export function buildProfile(input: ProfileInput): Record<string, unknown> {
     rules: state.rules.map((rule) => ({ id: rule.id, name: rule.name, bytes: rule.content.length })),
     policy: state.policy,
     capabilityProtocol: state.capabilityProtocol,
+    servers: {
+      hosts: input.servers ?? [],
+      lines: state.serversText ? state.serversText.trim().split(/\r?\n/).length : 0,
+    },
+    cwd: {
+      selections: state.cwdSelections,
+      scanned: input.cwd ?? [],
+    },
+    noticeAck: state.noticeAck,
+    customText: state.customText ?? "",
+    postPrompt: state.postPrompt,
     skills: {
       bundled: BUNDLED_SKILLS.length,
       ids: BUNDLED_SKILLS.map((skill) => skill.id),
+      installed: input.installedSkills ?? [],
     },
     hostFeatures: input.hostFeatures,
   }

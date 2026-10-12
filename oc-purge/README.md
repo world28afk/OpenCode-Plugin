@@ -24,11 +24,13 @@ oc-purge/
 │   │   └── capability-protocol.md      # 能力选用协议（官方 / 红队 lead / 红队 executor）
 │   └── src/
 │       ├── index.ts                    # 默认导出 { id, setup }
-│       ├── mount.ts                    # 挂载：注入 hook + 工具 + RPC（能力探测降级）
+│       ├── mount.ts                    # 挂载：注入 hook + 工具 + 命令 + RPC（能力探测降级）
 │       ├── config.ts                   # 状态模型 + 注入解析优先级 + 策略
 │       ├── inject.ts                   # 槽位组装 + ChatML 布局整理
-│       ├── tools.ts                    # purge_status / purge_inject / purge_rules / purge_skills
-│       ├── rpc.ts                      # dsh.purge.status RPC（get/set）
+│       ├── netScope.ts                 # Own servers 白名单校验（等价 net-scope.js）
+│       ├── workspace.ts                # CWD rules 扫描 / 勾选注入（等价 rules.js）
+│       ├── tools.ts                    # purge_* 工具集
+│       ├── rpc.ts                      # purge.status RPC（get/set/apply/revert/rules/skills/servers/cwd）
 │       ├── profile.ts                  # 状态元数据（工具与 RPC 共用）
 │       ├── prompts.ts / skills.ts      # 由 scripts/sync-assets.mjs 生成的内联资产
 │       └── tui.tsx                     # TUI 状态条半体
@@ -36,6 +38,7 @@ oc-purge/
 ├── skills/redteam.bundle.json.gz       # 技能资产包（压缩, 权威来源; 防终端安全软件误删明文）
 ├── presets/redteam/*                   # 上游红队预设（逐字保留）
 ├── docs/drill-auth-legal.html          # 上游 Drill 授权与法律声明（逐字保留）
+├── docs/comparison-with-upstream.md    # 与上游的界面/功能差异对照（含还原情况）
 ├── desktop/oc-purge-dock.js        # 桌面/Web DOM 注入（输入框上方「⚔ 破甲」+ 右侧面板）
 ├── scripts/
 │   ├── sync-assets.mjs                 # 资产 → 内联 TS 模块（prompts.ts / skills.ts）
@@ -85,22 +88,33 @@ node .\oc-purge\scripts\patch-desktop.mjs
 | `redteamChild` | `false` | 能力协议使用「红队 executor」措辞 |
 | `skillsDir` | `<项目>/.opencode/skills` | `purge_skills` 导出目标目录 |
 
-## 操作（工具 / RPC）
+## 操作（工具 / 命令 / RPC）
 
 | 工具 | 作用 |
 | :--- | :--- |
-| `purge_status` | 运行状态：注入槽位 / 提示词来源 / 策略 / 规则 / 技能 / 能力 |
-| `purge_inject` | `enable`·`disable`·`set-text`(等价 prompt-inject.md)·`clear-text`·`set-policy`·`set-post`·`set-capability` |
+| `purge_status` | 运行状态：注入槽位 / 提示词来源 / 策略 / 规则 / 服务器 / 本地规则 / 技能 |
+| `purge_apply` | 开注入并应用（等价上游 `purge_apply`） |
+| `purge_revert` | 回落内置默认（清自定义文本/激活规则，等价上游 `purge_revert`） |
+| `purge_inject` | `enable`·`disable`·`set-text`·`clear-text`·`set-policy`·`set-post`·`set-capability` |
 | `purge_rules` | `list`·`upsert`·`delete`·`activate`·`deactivate`（等价 `/rules`） |
-| `purge_skills` | `list`·`install`（导出内置红队技能） |
+| `purge_skills` | `list`·`install`·`import`·`create`·`delete`（等价 `/skills`） |
+| `purge_servers` | `list`·`set`（Own servers 白名单） |
+| `purge_cwd` | `scan`·`select`·`deselect`·`clear`（CWD rules） |
+
+斜杠命令（宿主提供 `command.transform` 时注册）：`/purge`、`/rules`、`/skills`。
 
 ```
-POST /api/rpc/dsh.purge.status/get   {"input":{}}
-POST /api/rpc/dsh.purge.status/set   {"input":{"policy":"strict","enabled":true}}
+POST /api/rpc/purge.status/{}          # get|set|apply|revert|rules|skills|servers|cwd
+POST /api/rpc/purge.status/set         {"input":{"policy":"strict","enabled":true}}
+POST /api/rpc/purge.status/rules       {"input":{"action":"activate","id":"alpha"}}
+POST /api/rpc/purge.status/servers     {"input":{"action":"set","text":"203.0.113.10"}}
 ```
 
-**注入解析优先级**（等价上游注入决策）：`customText` → 激活规则集 → 内置默认资产；
-策略 `fallback`（默认，用户文本优先否则用默认）/ `strict`（只用用户文本）/ `always`（用户文本后追加默认）。
+**注入解析优先级**：`customText`(A) → 激活规则集(A) → 勾选的本地规则(B) → 内置默认资产(D)；
+策略 `fallback`（默认）/ `strict`（只用用户文本）/ `always`（用户文本后追加默认）。
+
+> 与上游的完整界面/功能差异对照（含 N/A 原因）见
+> [docs/comparison-with-upstream.md](docs/comparison-with-upstream.md)。
 
 ## 回归校验
 
