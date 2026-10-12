@@ -65,17 +65,39 @@ function pruneBindings(bindings: PurgeState["bindings"], removedId: string): Pur
 
 /** 从 context 事件里取模型（不同版本字段略有差异, 全部容错）。 */
 function modelOf(event: unknown): { id: string; provider?: string } | null {
-  const value = (event as { model?: unknown })?.model
-  if (!value) return null
-  if (typeof value === "string") return { id: value }
-  if (typeof value === "object") {
-    const row = value as Record<string, unknown>
-    const id = typeof row.id === "string" ? row.id : typeof row.modelID === "string" ? row.modelID : undefined
-    const provider =
-      typeof row.providerID === "string" ? row.providerID : typeof row.provider === "string" ? row.provider : undefined
-    if (id) return { id, provider }
+  const e = (event ?? {}) as Record<string, unknown>
+  const fromValue = (value: unknown): { id: string; provider?: string } | null => {
+    if (!value) return null
+    if (typeof value === "string") return { id: value }
+    if (typeof value === "object") {
+      const row = value as Record<string, unknown>
+      const inner = typeof row.model === "object" && row.model ? (row.model as Record<string, unknown>) : row
+      const id =
+        typeof inner.id === "string"
+          ? inner.id
+          : typeof inner.modelID === "string"
+            ? inner.modelID
+            : typeof inner.model === "string"
+              ? inner.model
+              : undefined
+      const provider =
+        typeof inner.providerID === "string"
+          ? inner.providerID
+          : typeof inner.provider === "string"
+            ? inner.provider
+            : typeof row.providerID === "string"
+              ? row.providerID
+              : undefined
+      if (id) return { id, provider }
+    }
+    return null
   }
-  return null
+  return (
+    fromValue(e.model) ??
+    fromValue((e.session as Record<string, unknown> | undefined)?.model) ??
+    fromValue((e.request as Record<string, unknown> | undefined)?.model) ??
+    null
+  )
 }
 
 function agentOf(event: unknown): string | undefined {
@@ -158,6 +180,7 @@ export async function mount(ctx: Plugin.Context): Promise<Cleanup> {
   // 运行时观测：最近一次请求看到的模型 / agent（不落盘, 供面板显示与绑定校验）。
   let lastModel: string | null = null
   let lastAgent: string | null = null
+  let lastModelPersistAt = 0
 
   const installedSkills = (): string[] => {
     try {
@@ -353,8 +376,9 @@ export async function mount(ctx: Plugin.Context): Promise<Cleanup> {
         .map((line) => line.trim())
         .filter((line) => line && !line.startsWith("#")),
       cwd: scanCwdInstructions(projectDir).map((item) => ({ path: item.path, scope: item.scope, size: item.size })),
-      lastModel,
-      lastAgent,
+      lastModel: lastModel ?? state.lastModel,
+      lastAgent: lastAgent ?? state.lastAgent,
+      directory: projectDir,
     })
   }
 
@@ -368,6 +392,11 @@ export async function mount(ctx: Plugin.Context): Promise<Cleanup> {
         const agent = agentOf(event)
         if (model) lastModel = model.provider ? `${model.provider}/${model.id}` : model.id
         if (agent) lastAgent = agent
+        // 低频落盘（每 30s 至多一次）：便于其它 location 的 RPC 实例也能显示当前模型。
+        if ((lastModel || lastAgent) && Date.now() - lastModelPersistAt > 30_000) {
+          lastModelPersistAt = Date.now()
+          void controller.update({ lastModel, lastAgent })
+        }
         const cwdText = readSelectedCwdInject(state.cwdSelections, projectDir)
         const parts = buildSystemParts({
           state,

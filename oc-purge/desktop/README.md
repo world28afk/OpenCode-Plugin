@@ -39,6 +39,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/apply-desktop.ps1
 - **插件独立**：dock 自带服务地址探测（拦截页面 `/api/*` origin + 端口探测），面板底部「连接」可手填
   `http://127.0.0.1:49374` 之类的地址；**不读取其它插件的 localStorage 键**。
 - 面板采用「数据签名驱动渲染」：只在数据变化时重建，编辑中不重建，因此按钮随时可点、输入不丢字。
+- 面板自动带上当前会话 `location`（从页面请求里捕获，RPC 以 `location[directory]` 传参），
+  保证读到的模型/状态就是你正在用的会话；顶部「Inject 生效 · 来源 … · <模型>」即来自此。
+- 方案列表顶部固定「内置默认（破甲提示词）」：一键使用，或一键「复制为方案」变成可编辑方案。
 - 与其它插件（`oc-deepseek-banlance` / `oc-cyberbot` / `oc-plugin-manager` 等）注入共存互不影响：
   各自独立脚本、独立 `<script>` 标签、独立备份名。
 - 页面 CSP 禁止 `eval`，持久注入必须走 asar 内的同源脚本文件（本工具已按此实现）。

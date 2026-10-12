@@ -131,7 +131,9 @@ POST /api/rpc/purge.status/servers     {"input":{"action":"set","text":"203.0.11
 - **槽位命名**：`oc-purge:inject` / `oc-purge:capabilities` / `oc-purge:post`（order 值沿用上游 -100000 / -99999 / 5100）。
 - **技能目录**：OpenCode 实际发现路径 `<项目>/.opencode/skills/<id>/SKILL.md`（也兼容官方 `skill/`、`.claude/skills`）。
 - **插件独立**：桌面 dock 自带服务地址探测（拦截页面 `/api/*` origin + 端口探测 + 面板内「连接」手填），
-  **不依赖其它插件的 localStorage 键**。
+  **不依赖其它插件的 localStorage 键**；并自动从页面请求里捕获当前会话 `location`，
+  RPC 以 `location[directory]` 传参，确保读写命中**同一插件实例**（否则面板看到的模型/状态会与当前会话不一致）。
+- **内置默认恒可用**：方案列表顶部固定「内置默认（破甲提示词）」一行，可一键使用，也可一键「复制为方案」变成可编辑方案。
 - **无宿主补丁**：删除 `cordis.patch.yml` / patcher.js；卸载即净。
 
 ## 回归校验

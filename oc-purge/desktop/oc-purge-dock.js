@@ -57,8 +57,13 @@
     ui.serverBase = localStorage.getItem(LS_BASE) || ""
   } catch {}
 
-  // ── 自包含服务源发现 ─────────────────────────────────────────────────────
+  // ── 自包含服务源发现 + 位置捕获 ───────────────────────────────────────────
   const captured = new Set()
+  const locations = []
+  const rememberLocation = (value) => {
+    if (typeof value === "string" && value.trim() && !locations.includes(value)) locations.push(value)
+  }
+  const currentLocation = () => (locations.length ? locations[locations.length - 1] : null)
   const recordUrl = (value) => {
     try {
       const url = typeof value === "string" ? value : value && typeof value.url === "string" ? value.url : ""
@@ -67,6 +72,8 @@
       if (!/^https?:$/.test(absolute.protocol)) return
       if (absolute.pathname.indexOf("/api/") === -1) return
       captured.add(absolute.protocol + "//" + absolute.host)
+      const loc = absolute.searchParams.get("location") || absolute.searchParams.get("location[directory]")
+      if (loc) rememberLocation(loc)
     } catch {}
   }
   try {
@@ -138,16 +145,28 @@
   async function call(method, input) {
     const base = await baseURL()
     if (!base) throw new Error("未连接服务（可在「连接」里手填地址）")
-    const response = await fetch(`${base}/api/rpc/${RPC_ID}/${method}`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ input: input ?? {} }),
-    })
-    if (!response.ok) throw new Error(`RPC HTTP ${response.status}`)
-    const json = await response.json().catch(() => null)
-    const data = json && typeof json === "object" ? (json.output ?? json.data ?? json) : null
-    if (!data || typeof data !== "object") throw new Error("RPC 返回异常")
-    return data
+    const loc = currentLocation()
+    const attempt = async (query) => {
+      const response = await fetch(`${base}/api/rpc/${RPC_ID}/${method}${query}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ input: input ?? {} }),
+      })
+      if (!response.ok) throw new Error(`RPC HTTP ${response.status}`)
+      const json = await response.json().catch(() => null)
+      const data = json && typeof json === "object" ? (json.output ?? json.data ?? json) : null
+      if (!data || typeof data !== "object") throw new Error("RPC 返回异常")
+      return data
+    }
+    // RPC 的 location 查询是对象（location[directory]），带上才能命中当前会话所在的插件实例。
+    if (loc) {
+      try {
+        return await attempt(`?location[directory]=${encodeURIComponent(loc)}`)
+      } catch {
+        // 某些位置不是目录（或已失效）→ 退回无 location
+      }
+    }
+    return attempt("")
   }
 
   async function refresh() {
@@ -350,8 +369,28 @@
     body.append(quick)
 
     // 提示词方案（一键切换）
-    const schemesCard = card("提示词方案（一键切换）", "点方案即可切换；模型绑定可让不同模型用不同方案。当前生效：" + (p?.promptSource ?? "-") + (activeId ? `（方案 ${activeId}）` : "") + "。")
-    if (!schemes.length) schemesCard.append(el("div", "ocp-muted", "还没有方案。可在下面「另存为」把当前提示词存成方案，或用字段新建空方案。"))
+    const schemesCard = card("提示词方案（一键切换）", "点方案即可切换；模型绑定可让不同模型用不同方案。当前生效：" + (p?.promptSource ?? "-") + (activeId ? `（方案 ${activeId}）` : "（内置默认）") + "。")
+    // 内置默认（恒定可用）
+    const pinned = el("div", `ocp-row ${activeId ? "" : "on"}`)
+    const pmain = el("div", "ocp-row-main")
+    pmain.append(el("b", "", "内置默认（破甲提示词）"), el("span", "", `dsh-purge v${VERSION} 捆绑默认 · ${p?.defaultPromptBytes ?? 0}B · 恒定可用`))
+    pmain.title = "点击使用内置默认提示词"
+    pmain.addEventListener("click", () => act("rules", { action: "reset" }, "已切到内置默认"))
+    const pops = el("div", "ocp-ops")
+    pops.append(
+      activeId
+        ? button("使用", () => act("rules", { action: "reset" }, "已切到内置默认"), { sm: true, primary: true })
+        : button("使用中", () => {}, { sm: true, disabled: true }),
+      button("复制为方案", () => {
+        const id = ((ui.newId || "").trim() || "default").toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "") || "default"
+        void act("rules", { action: "save", id, name: (ui.newName || "").trim() || "默认破甲", content: p?.defaultPromptText || "" }, `已复制内置默认为方案 ${id}`).then(() =>
+          act("rules", { action: "use", id }, `已切换到 ${id}`),
+        )
+      }, { sm: true }),
+    )
+    pinned.append(pmain, pops)
+    schemesCard.append(pinned)
+    if (!schemes.length) schemesCard.append(el("div", "ocp-muted", "还没有自定义方案。点上面「复制为方案」可把内置默认存成可编辑方案；再「另存为方案」即可做多套（按模型切换）。"))
     for (const s of schemes) {
       const row = el("div", `ocp-row ${s.id === activeId ? "on" : ""}`)
       const main = el("div", "ocp-row-main")
@@ -422,6 +461,13 @@
         if (p && p.activeScheme) void act("rules", { action: "save", id: p.activeScheme.id, name: p.activeScheme.name, content: ui.editor }, "已保存方案")
         else void act("set", { customText: ui.editor }, "已保存手写提示词")
       }, { primary: true }),
+      button("载入内置默认", () => {
+        ui.editor = (p && p.defaultPromptText) || ""
+        ui.editorFor = "custom"
+        signature = ""
+        renderNow()
+        toast("已载入内置默认到编辑框（保存即写入手写文本）", "ok")
+      }),
       button("清空", () => {
         ui.editor = ""
         signature = ""
@@ -523,7 +569,8 @@
     body.append(skills)
 
     // 连接
-    const conn = card("连接", "插件自包含探测；失败可手填（如 http://127.0.0.1:49374）。")
+    const conn = card("连接", "插件自包含探测；失败可手填（如 http://127.0.0.1:49374）。RPC 会自动带上当前会话位置。")
+    conn.append(kv("服务位置", (p && p.directory) || "未知"))
     const connRow = el("div", "ocp-inline")
     connRow.append(
       field("serverBase", input("http://127.0.0.1:49374", ui.serverBase, (v) => (ui.serverBase = v))),
@@ -683,9 +730,9 @@
     const title = el("div", "ocp-title")
     const modelLine = () => {
       const p = state.profile
-      const model = p && p.lastModel ? p.lastModel : "等待模型调用…"
-      const src = p && p.promptSource ? p.promptSource : "-"
-      return `${model} · 来源 ${src}`
+      if (!p) return state.phase === "checking" ? "正在连接服务…" : "未连接服务"
+      const model = p.lastModel ? p.lastModel : "模型未识别（不影响注入）"
+      return `Inject 生效 · 来源 ${p.promptSource} · ${model}`
     }
     const b = el("b", "", "破甲 · dsh-purge")
     const small = el("small", "", modelLine())
@@ -753,9 +800,14 @@
     s.append(dot(on), el("span", "", running ? (on ? "运行中" : "已停用") : state.phase === "checking" ? "连接中…" : "未连接"))
     statusNode.append(s)
     if (running && state.profile) {
-      statusNode.append(chip(`方案 ${state.profile.activeScheme ? state.profile.activeScheme.id : "手写"}`, "info"))
+      statusNode.append(chip(`方案 ${state.profile.activeScheme ? state.profile.activeScheme.id : "内置默认"}`, "info"))
       statusNode.append(chip(`策略 ${state.profile.policy}`, ""))
       statusNode.append(chip(`方案数 ${state.profile.ruleCount ?? 0}`, ""))
+      const modelChip = chip(`模型 ${state.profile.lastModel || "未识别"}`, state.profile.lastModel ? "" : "warn")
+      modelChip.title = state.profile.lastModel
+        ? "最近一次模型调用看到的模型（用于模型绑定）"
+        : "尚未从 hooks 捕获到模型；注入仍正常。发送一条消息后即可显示。"
+      statusNode.append(modelChip)
     }
     if (state.busy) statusNode.append(chip("处理中…", "warn"))
     if (toastNode) {
@@ -769,7 +821,14 @@
         : "var(--muted)"
     }
     const sub = panel && panel.querySelector(`[${MARK}-sublabel]`)
-    if (sub && state.profile) sub.textContent = `${state.profile.lastModel || "等待模型调用…"} · 来源 ${state.profile.promptSource}`
+    if (sub) {
+      const p = state.profile
+      sub.textContent = p
+        ? `Inject 生效 · 来源 ${p.promptSource} · ${p.lastModel || "模型未识别（不影响注入）"}`
+        : state.phase === "checking"
+          ? "正在连接服务…"
+          : "未连接服务"
+    }
   }
 
   function focusSnapshot() {
@@ -930,6 +989,7 @@
   window.ocPurgeDock = {
     version: VERSION,
     state,
+    locations: () => locations.slice(),
     refresh: () => refresh(),
     open: () => {
       state.open = true
