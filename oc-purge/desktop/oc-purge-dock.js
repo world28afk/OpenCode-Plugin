@@ -64,6 +64,14 @@
     if (typeof value === "string" && value.trim() && !locations.includes(value)) locations.push(value)
   }
   const currentLocation = () => (locations.length ? locations[locations.length - 1] : null)
+  /** 当前会话模型：优先用「捕获到的位置」在跨实例注册表里的记录，其次用本实例的观测。 */
+  function effectiveModel(p) {
+    const loc = currentLocation()
+    const map = (p && p.modelsByDirectory) || {}
+    if (loc && map[loc] && map[loc].model) return map[loc].model
+    if (p && p.lastModel) return p.lastModel
+    return null
+  }
   const recordUrl = (value) => {
     try {
       const url = typeof value === "string" ? value : value && typeof value.url === "string" ? value.url : ""
@@ -485,7 +493,8 @@
     for (const item of entries) {
       const row = el("div", "ocp-row")
       const main = el("div", "ocp-row-main")
-      main.append(el("b", "", `${item.key}`), el("span", "", `${item.kind} → 方案 ${item.scheme}`))
+      const label = item.scheme === "__default__" ? "内置默认" : `方案 ${item.scheme}`
+      main.append(el("b", "", `${item.key}`), el("span", "", `${item.kind} → ${label}`))
       const ops = el("div", "ocp-ops")
       ops.append(button("解绑", () => act("rules", { action: "unbind", kind: item.kind, key: item.key }, "已解绑"), { sm: true, danger: true }))
       row.append(main, ops)
@@ -505,7 +514,8 @@
     bindRow.append(kindSel, field("bindKey", input(ui.bindKind === "model" ? "provider/model 或 model" : "agent id", ui.bindKey, (v) => (ui.bindKey = v))))
     const schemeSel = el("select", "ocp-input")
     schemeSel.style.maxWidth = "150px"
-    for (const s of schemes) {
+    const options = [{ id: "__default__", name: "内置默认" }, ...schemes]
+    for (const s of options) {
       const opt = el("option", "", `${s.name || s.id}`)
       opt.value = s.id
       if (ui.bindScheme === s.id) opt.selected = true
@@ -517,12 +527,12 @@
     bindCard.append(
       button("绑定", () => {
         const key = (ui.bindKey || "").trim()
-        const scheme = ui.bindScheme || (schemes[0] && schemes[0].id)
+        const scheme = ui.bindScheme || "__default__"
         if (!key) return toast("请填写匹配键", "warn"), renderNow()
-        if (!scheme) return toast("请先创建方案", "warn"), renderNow()
-        void act("rules", { action: "bind", kind: ui.bindKind, key, id: scheme }, `已绑定 ${key} → ${scheme}`)
+        void act("rules", { action: "bind", kind: ui.bindKind, key, id: scheme }, `已绑定 ${key} → ${scheme === "__default__" ? "内置默认" : scheme}`)
       }, { primary: true }),
     )
+    bindCard.append(el("div", "ocp-muted", "提示：可直接绑定「内置默认」；要按模型用不同自定义提示词，先在「提示词方案」里创建方案再绑定。匹配键形如 ds/deepseek-v4-pro 或 deepseek-flash。"))
     body.append(bindCard)
 
     // 自己的服务器
@@ -570,7 +580,11 @@
 
     // 连接
     const conn = card("连接", "插件自包含探测；失败可手填（如 http://127.0.0.1:49374）。RPC 会自动带上当前会话位置。")
-    conn.append(kv("服务位置", (p && p.directory) || "未知"))
+    conn.append(
+      kv("本实例位置", (p && p.directory) || "未知"),
+      kv("捕获到的会话位置", currentLocation() || "未捕获（将回退默认实例）"),
+      kv("模型注册表", `${Object.keys((p && p.modelsByDirectory) || {}).length} 条`),
+    )
     const connRow = el("div", "ocp-inline")
     connRow.append(
       field("serverBase", input("http://127.0.0.1:49374", ui.serverBase, (v) => (ui.serverBase = v))),
@@ -731,7 +745,7 @@
     const modelLine = () => {
       const p = state.profile
       if (!p) return state.phase === "checking" ? "正在连接服务…" : "未连接服务"
-      const model = p.lastModel ? p.lastModel : "模型未识别（不影响注入）"
+      const model = effectiveModel(p) || "模型未识别（不影响注入）"
       return `Inject 生效 · 来源 ${p.promptSource} · ${model}`
     }
     const b = el("b", "", "破甲 · dsh-purge")
@@ -803,10 +817,11 @@
       statusNode.append(chip(`方案 ${state.profile.activeScheme ? state.profile.activeScheme.id : "内置默认"}`, "info"))
       statusNode.append(chip(`策略 ${state.profile.policy}`, ""))
       statusNode.append(chip(`方案数 ${state.profile.ruleCount ?? 0}`, ""))
-      const modelChip = chip(`模型 ${state.profile.lastModel || "未识别"}`, state.profile.lastModel ? "" : "warn")
-      modelChip.title = state.profile.lastModel
-        ? "最近一次模型调用看到的模型（用于模型绑定）"
-        : "尚未从 hooks 捕获到模型；注入仍正常。发送一条消息后即可显示。"
+      const model = effectiveModel(state.profile)
+      const modelChip = chip(`模型 ${model || "未识别"}`, model ? "" : "warn")
+      modelChip.title = model
+        ? "当前会话模型（用于模型绑定）"
+        : "尚未捕获到模型；注入仍正常。发送一条消息后即可显示。"
       statusNode.append(modelChip)
     }
     if (state.busy) statusNode.append(chip("处理中…", "warn"))
@@ -824,7 +839,7 @@
     if (sub) {
       const p = state.profile
       sub.textContent = p
-        ? `Inject 生效 · 来源 ${p.promptSource} · ${p.lastModel || "模型未识别（不影响注入）"}`
+        ? `Inject 生效 · 来源 ${p.promptSource} · ${effectiveModel(p) || "模型未识别（不影响注入）"}`
         : state.phase === "checking"
           ? "正在连接服务…"
           : "未连接服务"

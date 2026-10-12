@@ -3,6 +3,7 @@
 // 框架无关: 通过 PurgeController 与宿主解耦, 便于假 Context 冒烟测试。
 
 import {
+  DEFAULT_SCHEME,
   WORKSPACE_POLICIES,
   type PurgeRule,
   type PurgeState,
@@ -171,7 +172,10 @@ export function buildTools(controller: PurgeController): ToolDefinition[] {
           if (kind !== "model" && kind !== "agent") return json({ ok: false, error: "kind 必须是 model / agent" })
           if (!key) return json({ ok: false, error: "key 必填" })
           const target = id ?? asString(input.newId)
-          if (!target || !state.rules.some((rule) => rule.id === target)) return json({ ok: false, error: `方案不存在: ${target ?? "(空)"}` })
+          if (!target) return json({ ok: false, error: "必须指定方案（id 或 __default__）" })
+          if (target !== DEFAULT_SCHEME && !state.rules.some((rule) => rule.id === target)) {
+            return json({ ok: false, error: `方案不存在: ${target}` })
+          }
           await controller.setBinding(kind, key, target)
           return json({ ok: true, action, kind, key, target, status: controller.profile() })
         }

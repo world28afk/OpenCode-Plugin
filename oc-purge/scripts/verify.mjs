@@ -147,6 +147,13 @@ if (!runningUnderBun) {
     check("resolveInjectText: 模型绑定覆盖启用方案", hit.text === "B" && hit.source === "binding", `${hit.source}:${hit.text}`)
     const miss = config.resolveInjectText(bound, "DEFAULT", "", { model: "z", provider: "x" })
     check("resolveInjectText: 未绑定回落到启用方案", miss.text === "A" && miss.source === "rule")
+    const toDefault = state({
+      activeRule: "a",
+      rules: [{ id: "a", name: "a", content: "A", updatedAt: 0 }],
+      bindings: { model: { "x/y": config.DEFAULT_SCHEME }, agent: {} },
+    })
+    const def = config.resolveInjectText(toDefault, "DEFAULT", "", { model: "y", provider: "x" })
+    check("resolveInjectText: 绑定到内置默认", def.text === "DEFAULT" && def.source === "binding", `${def.source}:${def.text}`)
   }
 
   // 纯函数: ChatML 布局整理 + OpenCode 剥壳

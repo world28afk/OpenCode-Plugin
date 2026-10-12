@@ -17,6 +17,7 @@ export interface ProfileInput {
   readonly lastModel?: string | null
   readonly lastAgent?: string | null
   readonly directory?: string | null
+  readonly modelsByDirectory?: Record<string, { model: string; agent?: string; at: number }>
 }
 
 export function buildProfile(input: ProfileInput): Record<string, unknown> {
@@ -91,6 +92,7 @@ export function buildProfile(input: ProfileInput): Record<string, unknown> {
     lastModel: input.lastModel ?? null,
     lastAgent: input.lastAgent ?? null,
     directory: input.directory ?? null,
+    modelsByDirectory: input.modelsByDirectory ?? {},
     policy: state.policy,
     capabilityProtocol: state.capabilityProtocol,
     servers: {

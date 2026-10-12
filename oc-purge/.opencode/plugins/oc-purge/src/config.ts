@@ -28,6 +28,9 @@ export const POST_SLOT = "oc-purge:post"
 export const WORKSPACE_POLICIES = ["fallback", "strict", "always"] as const
 export type WorkspacePolicy = (typeof WORKSPACE_POLICIES)[number]
 
+/** 绑定到「内置默认提示词」的哨兵值（不是方案 id）。 */
+export const DEFAULT_SCHEME = "__default__"
+
 export interface PurgeRule {
   readonly id: string
   readonly name: string
@@ -166,9 +169,13 @@ export interface InjectSelector {
   readonly agent?: string
 }
 
-/** 按选择器找命中的绑定方案 id（provider/model 精确 > model > agent）。 */
+/** 按选择器找命中的绑定方案 id（provider/model 精确 > model > agent）。可能返回 DEFAULT_SCHEME。 */
 export function boundSchemeId(state: PurgeState, selector: InjectSelector = {}): string | null {
-  const known = (id: string | undefined): string | null => (id && state.rules.some((r) => r.id === id) ? id : null)
+  const known = (id: string | undefined): string | null => {
+    if (!id) return null
+    if (id === DEFAULT_SCHEME) return DEFAULT_SCHEME
+    return state.rules.some((r) => r.id === id) ? id : null
+  }
   if (selector.model) {
     if (selector.provider) {
       const full = known(state.bindings.model[`${selector.provider}/${selector.model}`])
@@ -198,7 +205,7 @@ export interface ResolvedInject {
 /**
  * 解析本次要注入的正文。
  * 优先级（与上游 A→B→D + 策略 C 等价, 并新增「按模型绑定方案」）：
- *   模型/agent 绑定方案 → 当前启用方案 → 手写文本 → 勾选本地规则 → 内置默认
+ *   模型/agent 绑定（可绑到内置默认）→ 当前启用方案 → 手写文本 → 勾选本地规则 → 内置默认
  */
 export function resolveInjectText(
   state: PurgeState,
@@ -206,8 +213,12 @@ export function resolveInjectText(
   cwdText = "",
   selector: InjectSelector = {},
 ): ResolvedInject {
-  const find = (id: string | null | undefined) => (id ? state.rules.find((item) => item.id === id) : undefined)
   const binding = boundSchemeId(state, selector)
+  // 模型绑定到「内置默认」：显式选择, 直接使用内置默认（不受策略影响）。
+  if (binding === DEFAULT_SCHEME) {
+    return { text: defaultText, source: "binding", schemeId: null }
+  }
+  const find = (id: string | null | undefined) => (id ? state.rules.find((item) => item.id === id) : undefined)
   const rule = find(binding) ?? find(state.activeRule)
   const user = asText(rule?.content) ?? asText(state.customText) ?? asText(cwdText)
   const source: InjectSource = binding

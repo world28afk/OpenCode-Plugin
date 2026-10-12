@@ -1,7 +1,7 @@
 // 服务端挂载逻辑 — 与宿主 API 解耦, 便于用假 Context 做端到端冒烟测试。
 // src/index.ts 以 { id, setup: mount } 形式导出。
 
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { basename, join, resolve } from "node:path"
 import { spawnSync } from "node:child_process"
@@ -108,6 +108,37 @@ function agentOf(event: unknown): string | undefined {
     if (typeof id === "string") return id
   }
   return undefined
+}
+
+/** 跨 location 实例共享的「模型观测」注册表（写在系统临时目录, 各实例都可读）。 */
+const MODEL_REGISTRY = join(tmpdir(), "oc-purge-models.json")
+
+export interface ModelEntry {
+  readonly model: string
+  readonly agent?: string
+  readonly at: number
+}
+
+function readModelRegistry(): Record<string, ModelEntry> {
+  try {
+    const raw = readFileSync(MODEL_REGISTRY, "utf8")
+    const parsed = JSON.parse(raw)
+    if (parsed && typeof parsed === "object") return parsed as Record<string, ModelEntry>
+  } catch {
+    /* 首次或文件损坏 */
+  }
+  return {}
+}
+
+function writeModelRegistry(registry: Record<string, ModelEntry>): void {
+  try {
+    const entries = Object.entries(registry)
+      .sort((a, b) => (b[1]?.at ?? 0) - (a[1]?.at ?? 0))
+      .slice(0, 32)
+    writeFileSync(MODEL_REGISTRY, JSON.stringify(Object.fromEntries(entries)), "utf8")
+  } catch {
+    /* 写失败不影响注入 */
+  }
 }
 
 function skillDoc(id: string, description: string, body: string): string {
@@ -359,7 +390,11 @@ export async function mount(ctx: Plugin.Context): Promise<Cleanup> {
   }
 
   const profile = () => {
-    const [provider, modelID] = lastModel ? lastModel.split("/") : [undefined, undefined]
+    const registry = readModelRegistry()
+    const own = registry[projectDir]
+    // 只认本实例 / 本目录的记录, 不用「最新」兜底（否则会显示其它窗口的模型）。
+    const effectiveModel = lastModel ?? own?.model ?? state.lastModel
+    const [provider, modelID] = effectiveModel ? effectiveModel.split("/") : [undefined, undefined]
     return buildProfile({
       version: PLUGIN_VERSION,
       state,
@@ -376,9 +411,10 @@ export async function mount(ctx: Plugin.Context): Promise<Cleanup> {
         .map((line) => line.trim())
         .filter((line) => line && !line.startsWith("#")),
       cwd: scanCwdInstructions(projectDir).map((item) => ({ path: item.path, scope: item.scope, size: item.size })),
-      lastModel: lastModel ?? state.lastModel,
-      lastAgent: lastAgent ?? state.lastAgent,
+      lastModel: effectiveModel,
+      lastAgent: lastAgent ?? own?.agent ?? state.lastAgent,
       directory: projectDir,
+      modelsByDirectory: registry,
     })
   }
 
@@ -392,9 +428,12 @@ export async function mount(ctx: Plugin.Context): Promise<Cleanup> {
         const agent = agentOf(event)
         if (model) lastModel = model.provider ? `${model.provider}/${model.id}` : model.id
         if (agent) lastAgent = agent
-        // 低频落盘（每 30s 至多一次）：便于其它 location 的 RPC 实例也能显示当前模型。
-        if ((lastModel || lastAgent) && Date.now() - lastModelPersistAt > 30_000) {
+        // 低频写共享注册表（每 20s 至多一次）：其它 location 的 RPC 实例也能显示当前模型。
+        if ((lastModel || lastAgent) && Date.now() - lastModelPersistAt > 20_000) {
           lastModelPersistAt = Date.now()
+          const registry = readModelRegistry()
+          registry[projectDir] = { model: lastModel ?? "", agent: lastAgent ?? undefined, at: Date.now() }
+          writeModelRegistry(registry)
           void controller.update({ lastModel, lastAgent })
         }
         const cwdText = readSelectedCwdInject(state.cwdSelections, projectDir)

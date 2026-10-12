@@ -102,7 +102,8 @@ node .\oc-purge\scripts\patch-desktop.mjs
 | `purge_cwd` | `scan`·`select`·`deselect`·`clear`（CWD rules） |
 
 **提示词方案（一键切换）**：方案＝上游的规则集（`rules/`）。桌面面板点方案即切换；
-`bind` 可把「模型 / agent」映射到方案，实现上游 README 的卖点「不同模型可换不同提示词」：
+面板顶部固定「内置默认（破甲提示词）」可直接使用，或一键复制成可编辑方案。
+`bind` 可把「模型 / agent」映射到方案（也可直接绑定内置默认），实现上游 README 的卖点「不同模型可换不同提示词」：
 ```
 匹配顺序：provider/model → model → agent
 命中绑定 → 当前启用方案 → 手写文本 → 勾选本地规则 → 内置默认
