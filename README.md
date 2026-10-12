@@ -8,7 +8,7 @@
 
 | 目录 | 说明 | 类型 |
 | :--- | :--- | :--- |
-| `oc-infinite-gen-4` | 无限四代内核移植 + 桌面徽章 | 服务端 + 桌面注入 |
+| `oc-infinite-gen-4` | ~~无限四代内核移植 + 桌面徽章~~（**已停用并从 OpenCode 移除**；源码保留，桌面 badge 已从 app.asar 清理） | 服务端 + 桌面注入 |
 | `oc-purge` | dsh-purge 破甲移植（逐模型可换提示词 + 规则库 + 内置红队技能 + 桌面 dock） | 服务端 + 桌面注入 |
 | `oc-deepseek-banlance` | DeepSeek 余额（上下文圈 + 审查页） | 服务端 + 桌面注入 |
 | `oc-plugin-manager` | 插件管理器（设置页原生开关启用/禁用） | 服务端 + 桌面注入 |
@@ -25,9 +25,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\sync-plugins.ps1
 # 2) 桌面注入（各插件自带, 互不影响）
 node .\oc-plugin-manager\scripts\patch-desktop.mjs          # 插件管理器开关
 node .\oc-exit\scripts\patch-desktop.mjs                    # 右下角退出角标
-node .\oc-infinite-gen-4\scripts\patch-desktop.mjs          # 无限四代徽章
-node .\oc-purge\scripts\patch-desktop.mjs               # 破甲 dock（输入框上方按钮 + 右侧面板）
+node .\oc-purge\scripts\patch-desktop.mjs                   # 破甲 dock（输入框上方按钮 + 右侧面板）
 node .\oc-deepseek-banlance\scripts\patch-desktop.mjs       # 余额注入（如有）
+# 注: oc-infinite-gen-4 已停用, 不再注入桌面端（见根 scripts/patch-desktop.py 的 DISABLED_PLUGINS）
 # 或使用各自的 scripts\apply-desktop.ps1（自动关闭→打补丁→重启）
 
 # 3) 回归校验（各仓库根目录）
@@ -42,7 +42,7 @@ Windows 的 `.mjs` 补丁工具依赖 Node + npx；macOS（或任何没有 Node 
 ```bash
 python3 scripts/patch-desktop.py --dry-run                # 验证（不改动安装）
 python3 scripts/patch-desktop.py                          # 注入（自动备份, 原子替换）
-python3 scripts/patch-desktop.py --only oc-infinite-gen-4 # 只处理指定插件
+python3 scripts/patch-desktop.py --only oc-purge          # 只处理指定插件
 python3 scripts/patch-desktop.py --unpatch                # 移除注入（可跟插件名）
 python3 scripts/patch-desktop.py --restore                # 从备份还原
 ```
@@ -52,7 +52,8 @@ python3 scripts/patch-desktop.py --restore                # 从备份还原
 - 与 `.mjs` 完全互相兼容：相同标签/插入位置/备份文件名，可交叉 `--restore` / `--unpatch`。
 - 追加式改写（旧数据区原样保留），运行中的桌面端不受影响，重启后生效；重复执行安全（不产生重复标签）。
 - macOS 若重开后被系统报「已损坏」：`xattr -dr com.apple.quarantine /Applications/OpenCode.app`。
-- 适用范围：renderer 注入插件（`oc-infinite-gen-4` / `oc-deepseek-banlance` / `oc-plugin-manager`）；
+- 适用范围：renderer 注入插件（`oc-cyberbot` / `oc-deepseek-banlance` / `oc-plugin-manager` / `oc-purge`；
+  `oc-infinite-gen-4` 已停用不再注入）；
   `oc-exit` 为主进程托盘注入（Windows 专属），不在其列。
 
 ## 约定

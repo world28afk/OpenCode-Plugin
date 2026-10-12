@@ -3,8 +3,9 @@
 #   powershell -NoProfile -ExecutionPolicy Bypass -File D:\OpenCode-Plugin\scripts\apply-desktop-all.ps1
 #
 # 说明：
-#   - 根 scripts/patch-desktop.py 会动态发现所有 oc-*/desktop/*-inject.js
-#     （oc-cyberbot / oc-deepseek-banlance / oc-infinite-gen-4 / oc-plugin-manager）。
+#   - 根 scripts/patch-desktop.py 会动态发现所有 oc-*/desktop/*-inject.js 与 *-dock.js
+#     （oc-cyberbot / oc-deepseek-banlance / oc-plugin-manager / oc-purge）。
+#     oc-infinite-gen-4 已停用（DISABLED_PLUGINS），不再注入。
 #   - 桌面端会先被关闭（app.asar 被占用时无法写入），打完补丁后自动重启。
 #   - 卸载/还原见同目录 patch-desktop.py 的 --unpatch / --restore。
 param(

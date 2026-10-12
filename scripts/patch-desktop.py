@@ -13,14 +13,15 @@
 #     正在运行的桌面端不受影响（重启后生效）;
 #   • 与 .mjs 完全互相兼容: 相同的标签、插入位置与备份文件名, 两边都可以 --restore / --unpatch。
 #
-# 适用插件: 采用 renderer 注入（desktop/*-inject.js → out/renderer/index.html）的插件,
-# 当前为 oc-infinite-gen-4 / oc-deepseek-banlance / oc-plugin-manager。
+# 适用插件: 采用 renderer 注入（desktop/*-inject.js 或 desktop/*-dock.js → out/renderer/index.html）的插件,
+# 当前为 oc-cyberbot / oc-deepseek-banlance / oc-plugin-manager / oc-purge。
 # oc-exit 为主进程托盘注入（Windows 专属, 注入 out/main/index.js）, 不在本脚本范围内。
+# oc-infinite-gen-4 已停用（见 DISABLED_PLUGINS, 不再注入）。
 #
 # 用法:
 #   python3 scripts/patch-desktop.py                     # 注入全部（自动备份, 原子替换）
 #   python3 scripts/patch-desktop.py --dry-run           # 只验证, 不改动安装
-#   python3 scripts/patch-desktop.py --only oc-infinite-gen-4
+#   python3 scripts/patch-desktop.py --only oc-purge
 #   python3 scripts/patch-desktop.py --unpatch                           # 移除全部注入
 #   python3 scripts/patch-desktop.py --unpatch oc-deepseek-banlance      # 只移除指定插件
 #   python3 scripts/patch-desktop.py --restore           # 从首次备份还原
@@ -53,8 +54,12 @@ for _stream in (sys.stdout, sys.stderr):
         pass
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-INJECT_SUFFIX = "-inject.js"
+INJECT_SUFFIXES = ("-inject.js", "-dock.js")  # 兼容 *.mjs 各插件的命名（-inject.js / -dock.js）
 BLOCK_SIZE = 4194304  # 与 @electron/asar 的 integrity 分块一致（4 MiB）
+
+# 已停用/除名的插件：源码保留，但不再注入桌面端（防止全量重打把旧 UI 又注回去）。
+# oc-infinite-gen-4 已从 OpenCode 移除（badge UI 亦已从 app.asar 清理）。
+DISABLED_PLUGINS = {"oc-infinite-gen-4"}
 
 
 class AsarError(RuntimeError):
@@ -76,19 +81,22 @@ def discover_plugins():
     for child in sorted(REPO_ROOT.iterdir()):
         if not child.is_dir() or not child.name.startswith("oc-"):
             continue
+        if child.name in DISABLED_PLUGINS:
+            continue
         desktop = child / "desktop"
         if not desktop.is_dir():
             continue
-        for source in sorted(desktop.glob(f"*{INJECT_SUFFIX}")):
-            base = source.name[: -len(INJECT_SUFFIX)]  # 例: oc-balance-inject.js -> oc-balance
-            plugins.append(
-                {
-                    "name": child.name,                 # 目录名, 例: oc-deepseek-banlance
-                    "source": source,                   # desktop/oc-balance-inject.js
-                    "inject_name": source.name,         # 注入到 renderer 的文件名
-                    "backup_suffix": f".{base}.bak",    # 与 .mjs 一致: app.asar.oc-balance.bak
-                }
-            )
+        for suffix in INJECT_SUFFIXES:
+            for source in sorted(desktop.glob(f"*{suffix}")):
+                base = source.name[: -len(suffix)]  # 例: oc-balance-inject.js -> oc-balance
+                plugins.append(
+                    {
+                        "name": child.name,                 # 目录名, 例: oc-deepseek-banlance
+                        "source": source,                   # desktop/oc-balance-inject.js
+                        "inject_name": source.name,         # 注入到 renderer 的文件名
+                        "backup_suffix": f".{base}.bak",    # 与 .mjs 一致: app.asar.oc-balance.bak
+                    }
+                )
     return plugins
 
 
