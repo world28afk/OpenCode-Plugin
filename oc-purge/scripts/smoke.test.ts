@@ -126,9 +126,10 @@ describe("oc-purge mount", () => {
 
     const parts = systemOf(harness.hooks[0]!)
     expect(parts).toHaveLength(2)
-    expect(parts[0]!.metadata).toMatchObject({ source: PLUGIN_ID, slot: "dshpg-inject", order: -100000 })
+    expect(parts[0]!.metadata).toMatchObject({ source: PLUGIN_ID, slot: "oc-purge:inject", order: -100000 })
     expect(parts[0]!.text).toContain("HARD OUTPUT RULES")
-    expect(parts[1]!.metadata).toMatchObject({ slot: "dshpg-capabilities", order: -99999 })
+    expect(parts[0]!.text).not.toContain("<|im_start|>")
+    expect(parts[1]!.metadata).toMatchObject({ slot: "oc-purge:capabilities", order: -99999 })
 
     await cleanup()
     expect(harness.hooks[0]!.disposed).toBe(true)
@@ -175,7 +176,7 @@ describe("oc-purge mount", () => {
     const harness = makeContext()
     await mount(harness.ctx)
     await harness.tools.find((tool) => tool.name === "purge_inject")!.execute({ action: "set-policy", policy: "strict" })
-    expect(systemOf(harness.hooks[0]!).map((part) => part.metadata?.slot)).toEqual(["dshpg-capabilities"])
+    expect(systemOf(harness.hooks[0]!).map((part) => part.metadata?.slot)).toEqual(["oc-purge:capabilities"])
   })
 
   test("purge_rules: upsert + activate drives injection", async () => {

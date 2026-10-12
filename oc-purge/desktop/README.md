@@ -34,6 +34,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/apply-desktop.ps1
 ## 注意
 
 - 桌面端**自动更新会覆盖 app.asar**，升级后需重新打补丁。
-- 与其它插件（`oc-infinite-gen-4` / `oc-deepseek-banlance` 等）注入共存互不影响：
+- **插件独立**：dock 自带服务地址探测（拦截页面 `/api/*` origin + 端口探测），面板底部「连接」可手填
+  `http://127.0.0.1:49374` 之类的地址；**不读取其它插件的 localStorage 键**。
+- 面板采用「数据签名驱动渲染」：只在数据变化时重建，编辑中不重建，因此按钮随时可点、输入不丢字。
+- 与其它插件（`oc-deepseek-banlance` / `oc-cyberbot` / `oc-plugin-manager` 等）注入共存互不影响：
   各自独立脚本、独立 `<script>` 标签、独立备份名。
 - 页面 CSP 禁止 `eval`，持久注入必须走 asar 内的同源脚本文件（本工具已按此实现）。

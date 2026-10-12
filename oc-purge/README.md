@@ -116,6 +116,17 @@ POST /api/rpc/purge.status/servers     {"input":{"action":"set","text":"203.0.11
 > 与上游的完整界面/功能差异对照（含 N/A 原因）见
 > [docs/comparison-with-upstream.md](docs/comparison-with-upstream.md)。
 
+## OpenCode 适配要点
+
+- **注入即生效**：`session.hook("context")` 在每次模型调用组装 system 时注入，改动无需重启宿主。
+- **剥离 ChatML 外壳**：上游把注入文本当 DSH 的 ChatML system 消息；OpenCode 的 system 已是结构化段，
+  默认只注入正文（`options.preserveChatml: true` 可还原上游原样）。
+- **槽位命名**：`oc-purge:inject` / `oc-purge:capabilities` / `oc-purge:post`（order 值沿用上游 -100000 / -99999 / 5100）。
+- **技能目录**：OpenCode 实际发现路径 `<项目>/.opencode/skills/<id>/SKILL.md`（也兼容官方 `skill/`、`.claude/skills`）。
+- **插件独立**：桌面 dock 自带服务地址探测（拦截页面 `/api/*` origin + 端口探测 + 面板内「连接」手填），
+  **不依赖其它插件的 localStorage 键**。
+- **无宿主补丁**：删除 `cordis.patch.yml` / patcher.js；卸载即净。
+
 ## 回归校验
 
 ```powershell

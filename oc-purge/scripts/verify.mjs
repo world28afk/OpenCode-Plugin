@@ -131,9 +131,11 @@ if (!runningUnderBun) {
     config.resolveInjectText(state({ policy: "always", customText: "H" }), "DEFAULT").text === "H\n\nDEFAULT",
   )
 
-  // 纯函数: ChatML 布局整理
+  // 纯函数: ChatML 布局整理 + OpenCode 剥壳
   const normalized = inject.normalizeInjectLayout("<|im_start|>system:<project_instructions>\nHello")
   check("normalizeInjectLayout 拆行 + 闭合 project 标签", normalized.includes("<|im_start|>system:\n") && normalized.includes("</project_instructions>"))
+  const stripped = inject.prepareInjectText("<|im_start|>system:\n<project_instructions>\nHARD OUTPUT RULES\n</project_instructions>")
+  check("prepareInjectText 剥离 ChatML 外壳（OpenCode 语义）", !stripped.includes("<|im_start|>") && !stripped.includes("project_instructions") && stripped.startsWith("HARD OUTPUT RULES"))
 
   // 挂点元数据
   const parts = inject.buildSystemParts({

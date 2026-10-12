@@ -21,9 +21,9 @@ export const CAPABILITY_ORDER = GLOBAL_PROMPT_ORDER + 1
 /** 上游 postPromptOrder 默认 5100。 */
 export const DEFAULT_POST_PROMPT_ORDER = 5100
 
-export const INJECT_SLOT = "dshpg-inject"
-export const CAPABILITY_SLOT = "dshpg-capabilities"
-export const POST_SLOT = "dsh-purge:post"
+export const INJECT_SLOT = "oc-purge:inject"
+export const CAPABILITY_SLOT = "oc-purge:capabilities"
+export const POST_SLOT = "oc-purge:post"
 
 export const WORKSPACE_POLICIES = ["fallback", "strict", "always"] as const
 export type WorkspacePolicy = (typeof WORKSPACE_POLICIES)[number]

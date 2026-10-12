@@ -80,3 +80,21 @@
 
 资产：
 - 默认提示词（解封）、能力协议、23 项红队技能、红队预设、Drill 授权声明 **逐字保留**，SHA256 校验。
+
+---
+
+## 5. OpenCode 语义适配（与上游的刻意差异）
+
+上游的运行宿主是 DSH（Cordis）。下列差异是**为了让功能在 OpenCode 上正确工作**而刻意保留的：
+
+| 项目 | 上游（DSH） | oc-purge（OpenCode） | 原因 |
+| :--- | :--- | :--- | :--- |
+| 注入正文外壳 | 作为 ChatML system 消息（`<\|im_start\|>system:` + `<project_instructions>`）注入 | 默认**剥离外壳**，只注入正文（`options.preserveChatml:true` 可还原） | OpenCode 的 `event.system` 已是结构化 system 段，再套 ChatML 只会变成噪音 |
+| DSH 模板变量 | `escapeDshInterpolation` 把非法 `{{` 拆成 `{ {`（DSH 会插值 `{{cwd}}` 等） | 删除该步（OpenCode 无模板层；资产内也无 `{{}}`） | 无插值语义 |
+| 注入槽位名 | `dsh-purge` / `dshpg-capabilities` / `dsh-purge:post` | `oc-purge:inject` / `oc-purge:capabilities` / `oc-purge:post`（order 值不变） | 用 OpenCode 侧命名，避免 DSH 专属前缀 |
+| 技能目录 | `$DSH_HOME/skills/<id>/SKILL.md` | `<项目>/.opencode/skills/<id>/SKILL.md`（含 frontmatter） | OpenCode 实际技能发现路径（`<dir>/skill`、`<dir>/skills`、`**/SKILL.md`） |
+| 服务地址探测 | 宿主 slot/HTTP 桥 | 注入脚本**自包含**探测（拦截页面 `/api/*` origin + 端口探测 + 手填「连接」）；不读其它插件键 | 插件独立，不互相依赖 |
+| 生效方式 | Apply 后重启宿主 | `session.hook("context")` 每次调用生效，改完即用、无需重启 | 迁移指南 §4.5 |
+| 状态存储 | `$DSH_HOME` 文件 | 插件私有 `ctx.storage` | OpenCode 无宿主文件补丁面 |
+
+界面侧：dock 采用**数据签名驱动渲染**（只在数据变化时重建，编辑中不重建），修复了「反复重建导致按钮/输入框不可点击」的问题；并加入分区标题+说明、状态胶囊、操作结果提示（toast）、编辑字符计数，功能更清晰。

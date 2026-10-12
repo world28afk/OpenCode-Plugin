@@ -37,7 +37,7 @@ function hasFunction(value: unknown, key: string): boolean {
 
 const HOST_FEATURES = [
   'Context Hook Injection: session.hook("context") 每次模型调用组装 system 数组（等价 systemPrompt.section）',
-  "Capability Protocol: dshpg-capabilities 段（official / redteam-lead / redteam-child）",
+  "Capability Protocol: oc-purge:capabilities 段（official / redteam-lead / redteam-child）",
   "Rules Library: 多规则集存储于插件私有 ctx.storage（等价 $DSH_HOME/rules/）",
   "Workspace Policy: fallback / strict / always（等价 workspace baseline 策略）",
   "CWD Rules: 扫描当前目录/祖先的 AGENTS.md / CLAUDE.md 并勾选注入（等价 CWD rules）",
@@ -95,6 +95,7 @@ export async function mount(ctx: Plugin.Context): Promise<Cleanup> {
   const inject = options.inject !== false && canHook
   const redteam = options.redteam === true
   const redteamChild = options.redteamChild === true
+  const preserveChatml = options.preserveChatml === true
 
   // ── 状态装载（ctx.storage 优先, 否则内存默认） ──────────────────────────
   let state: PurgeState = DEFAULT_STATE
@@ -287,6 +288,7 @@ export async function mount(ctx: Plugin.Context): Promise<Cleanup> {
           redteam,
           redteamChild,
           pluginID: PLUGIN_ID,
+          preserveChatml,
         })
         for (const part of parts) event.system.push(part)
       }),

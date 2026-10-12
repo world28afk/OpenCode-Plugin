@@ -3,7 +3,7 @@
 
 import { BUNDLED_SKILLS } from "./skills"
 import { DEFAULT_PROMPT_SHA256 } from "./prompts"
-import { GLOBAL_PROMPT_ORDER, type PurgeState, type ResolvedInject } from "./config"
+import { CAPABILITY_SLOT, GLOBAL_PROMPT_ORDER, INJECT_SLOT, POST_SLOT, type PurgeState, type ResolvedInject } from "./config"
 
 export interface ProfileInput {
   readonly version: string
@@ -34,7 +34,7 @@ export function buildProfile(input: ProfileInput): Record<string, unknown> {
     // 上游补丁清单在 OpenCode 无宿主补丁面（迁移指南 §4.5），此处列出等价能力。
     capabilities: [
       "PromptInject: session.hook(\"context\") 每次模型调用注入（等价 systemPrompt.section）",
-      "CapabilityProtocol: dshpg-capabilities 段（官方/红队 lead/红队 executor 三态）",
+      "CapabilityProtocol: oc-purge:capabilities 段（官方/红队 lead/红队 executor 三态）",
       "RulesLibrary: 多规则集启用/删除（等价 rules/ + /rules 命令）",
       "WorkspacePolicy: fallback / strict / always（等价 workspace baseline 策略）",
       "PurgeTools: purge_status / purge_inject / purge_rules / purge_skills",
@@ -48,20 +48,20 @@ export function buildProfile(input: ProfileInput): Record<string, unknown> {
     injection: [
       {
         hook: "session.context",
-        slot: "dshpg-inject",
+        slot: INJECT_SLOT,
         order: GLOBAL_PROMPT_ORDER,
         source: resolved.source,
         enabled: live && Boolean(resolved.text.trim()),
       },
       {
         hook: "session.context",
-        slot: "dshpg-capabilities",
+        slot: CAPABILITY_SLOT,
         order: GLOBAL_PROMPT_ORDER + 1,
         enabled: live && state.capabilityProtocol,
       },
       {
         hook: "session.context",
-        slot: "dsh-purge:post",
+        slot: POST_SLOT,
         order: state.postPromptOrder,
         enabled: live && Boolean(state.postPrompt.trim()),
       },

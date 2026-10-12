@@ -50,6 +50,30 @@ export function normalizeInjectLayout(text: string): string {
     .replace(/\s+$/, "")
 }
 
+/**
+ * OpenCode 适配: 上游把注入文本当作 DSH 的 ChatML system 消息（含
+ * `<|im_start|>system:` / `<project_instructions>` 外壳）。OpenCode 的
+ * `event.system` 已经是结构化 system 段, 再套一层 ChatML 只会变成噪音,
+ * 因此默认剥掉外壳标签、只留正文。可用 metadata/slot 审计, 也可用
+ * options.preserveChatml 恢复上游原样。
+ */
+export function stripChatmlEnvelope(text: string): string {
+  return String(text ?? "")
+    .replace(/^\uFEFF/, "")
+    .replace(/\r\n/g, "\n")
+    .replace(/<\|im_start\|>\s*system\s*:\s*/gi, "")
+    .replace(/<\/?project_instructions>/gi, "")
+    .replace(/<\|im_end\|>/g, "")
+    .replace(/^\s*\n+/, "")
+    .replace(/\s+$/, "")
+}
+
+/** 面向 OpenCode 的注入正文整理器。 */
+export function prepareInjectText(text: string, options: { preserveChatml?: boolean } = {}): string {
+  if (options.preserveChatml) return normalizeInjectLayout(text)
+  return stripChatmlEnvelope(normalizeInjectLayout(text))
+}
+
 /** 注入到 OpenCode system 数组的最小结构 (对齐 @opencode/ai SystemPart)。 */
 export interface SystemTextPart {
   readonly type: "text"
@@ -63,6 +87,8 @@ export interface BuildInjectOptions {
   readonly redteam?: boolean
   readonly redteamChild?: boolean
   readonly pluginID?: string
+  /** true = 保留上游 ChatML 外壳（默认 false, 面向 OpenCode 剥壳）。 */
+  readonly preserveChatml?: boolean
 }
 
 /** 生成本次模型调用要追加的 system 段列表。 */
@@ -76,7 +102,7 @@ export function buildSystemParts(options: BuildInjectOptions): SystemTextPart[] 
   if (resolved.text.trim()) {
     parts.push({
       type: "text",
-      text: normalizeInjectLayout(resolved.text),
+      text: prepareInjectText(resolved.text, { preserveChatml: options.preserveChatml }),
       metadata: { source: pluginID, slot: INJECT_SLOT, order: GLOBAL_PROMPT_ORDER, origin: resolved.source },
     })
   }
