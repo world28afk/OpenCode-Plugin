@@ -16,10 +16,16 @@ export interface PurgeController {
   profile(): Record<string, unknown>
   /** 合并式更新状态并持久化。 */
   update(patch: Partial<PurgeState>): Promise<PurgeState>
-  /** 新增/覆盖规则集。 */
+  /** 新增/覆盖规则集（方案）。 */
   upsertRule(rule: Omit<PurgeRule, "updatedAt"> & { updatedAt?: number }): Promise<PurgeState>
   /** 删除规则集。 */
   deleteRule(id: string): Promise<{ removed: boolean; state: PurgeState }>
+  /** 复制方案。 */
+  duplicateRule(id: string, newId: string): Promise<{ ok: boolean; error?: string; state: PurgeState }>
+  /** 重命名方案。 */
+  renameRule(id: string, name: string): Promise<{ ok: boolean; error?: string; state: PurgeState }>
+  /** 绑定/解绑 方案到 模型/agent（schemeId=null 表示解绑）。 */
+  setBinding(kind: "model" | "agent", key: string, schemeId: string | null): Promise<PurgeState>
   /** 上游 purge_apply 的等价动作: 开注入 + 能力协议（写默认提示词）。 */
   apply(): Promise<PurgeState>
   /** 上游 purge_revert 的等价动作: 清自定义文本/激活规则, 回落内置默认。 */
@@ -127,48 +133,85 @@ export function buildTools(controller: PurgeController): ToolDefinition[] {
     {
       name: "purge_rules",
       description:
-        "Manage the oc-purge rule library (OpenCode equivalent of $DSH_HOME/rules/ + /rules command). " +
-        "Actions: list | upsert | delete | activate | deactivate.",
+        "Prompt schemes (upstream rule library / $DSH_HOME/rules/, one-click switching). " +
+        "Actions: list | use | save | duplicate | rename | delete | bind | unbind | reset. " +
+        "'use' activates a scheme immediately; 'bind' maps a model/agent to a scheme; 'reset' clears the active scheme.",
       input: {
         type: "object",
         properties: {
-          action: { type: "string", enum: ["list", "upsert", "delete", "activate", "deactivate"] },
-          id: { type: "string", description: "规则集 id（upsert/delete/activate 必填）" },
-          name: { type: "string" },
-          content: { type: "string", description: "规则集正文（upsert 必填）" },
+          action: {
+            type: "string",
+            enum: ["list", "use", "save", "duplicate", "rename", "delete", "bind", "unbind", "reset", "activate", "deactivate", "upsert"],
+          },
+          id: { type: "string", description: "方案 id" },
+          name: { type: "string", description: "方案显示名" },
+          content: { type: "string", description: "方案正文（save/upsert 用）" },
+          newId: { type: "string", description: "duplicate 的目标 id" },
+          kind: { type: "string", enum: ["model", "agent"], description: "bind/unbind 类型" },
+          key: { type: "string", description: "bind/unbind 的键（provider/model、model 或 agent id）" },
         },
         required: ["action"],
         additionalProperties: false,
       },
       execute: async (input) => {
         const action = asString(input.action) ?? "list"
-        if (action === "list") {
-          const state = controller.state()
-          return json({
-            active: state.activeRule,
-            policy: state.policy,
-            rules: state.rules.map((rule) => ({ id: rule.id, name: rule.name, bytes: rule.content.length })),
-          })
-        }
         const id = asString(input.id)
+        const state = controller.state()
+
+        if (action === "list") return json(controller.profile())
+
+        if (action === "reset" || action === "deactivate") {
+          await controller.update({ activeRule: null })
+          return json({ ok: true, action: "reset", status: controller.profile() })
+        }
+
+        if (action === "bind") {
+          const kind = asString(input.kind)
+          const key = asString(input.key)
+          if (kind !== "model" && kind !== "agent") return json({ ok: false, error: "kind 必须是 model / agent" })
+          if (!key) return json({ ok: false, error: "key 必填" })
+          const target = id ?? asString(input.newId)
+          if (!target || !state.rules.some((rule) => rule.id === target)) return json({ ok: false, error: `方案不存在: ${target ?? "(空)"}` })
+          await controller.setBinding(kind, key, target)
+          return json({ ok: true, action, kind, key, target, status: controller.profile() })
+        }
+
+        if (action === "unbind") {
+          const kind = asString(input.kind)
+          const key = asString(input.key)
+          if ((kind !== "model" && kind !== "agent") || !key) return json({ ok: false, error: "kind/key 必填" })
+          await controller.setBinding(kind, key, null)
+          return json({ ok: true, action, kind, key, status: controller.profile() })
+        }
+
         if (!id) return json({ ok: false, error: "id 必填" })
-        if (action === "upsert") {
+
+        if (action === "use" || action === "activate") {
+          if (!state.rules.some((rule) => rule.id === id)) return json({ ok: false, error: `方案不存在: ${id}` })
+          await controller.update({ activeRule: id })
+          return json({ ok: true, action: "use", id, status: controller.profile() })
+        }
+        if (action === "save" || action === "upsert") {
           const content = asString(input.content)
           if (content === undefined) return json({ ok: false, error: "content 必填" })
           await controller.upsertRule({ id, name: asString(input.name) ?? id, content })
-          return json({ ok: true, action, id, status: controller.profile() })
+          return json({ ok: true, action: "save", id, status: controller.profile() })
         }
         if (action === "delete") {
           const result = await controller.deleteRule(id)
           return json({ ok: result.removed, action, id, status: controller.profile() })
         }
-        if (action === "activate") {
-          if (!controller.state().rules.some((rule) => rule.id === id)) return json({ ok: false, error: `规则集不存在: ${id}` })
-          await controller.update({ activeRule: id })
-          return json({ ok: true, action, id, status: controller.profile() })
+        if (action === "duplicate") {
+          const newId = asString(input.newId)
+          if (!newId) return json({ ok: false, error: "newId 必填" })
+          return json({ action, ...(await controller.duplicateRule(id, newId)), status: controller.profile() })
         }
-        await controller.update({ activeRule: null })
-        return json({ ok: true, action: "deactivate", status: controller.profile() })
+        if (action === "rename") {
+          const name = asString(input.name)
+          if (!name) return json({ ok: false, error: "name 必填" })
+          return json({ action, ...(await controller.renameRule(id, name)), status: controller.profile() })
+        }
+        return json({ ok: false, error: `未知 action: ${action}` })
       },
     },
     {

@@ -53,6 +53,41 @@ const HOST_FEATURES = [
 
 const SKILL_ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 
+/** 删除方案时清理指向它的绑定。 */
+function pruneBindings(bindings: PurgeState["bindings"], removedId: string): PurgeState["bindings"] {
+  const strip = (table: Readonly<Record<string, string>>): Record<string, string> => {
+    const out: Record<string, string> = {}
+    for (const [key, value] of Object.entries(table)) if (value !== removedId) out[key] = value
+    return out
+  }
+  return { model: strip(bindings.model), agent: strip(bindings.agent) }
+}
+
+/** 从 context 事件里取模型（不同版本字段略有差异, 全部容错）。 */
+function modelOf(event: unknown): { id: string; provider?: string } | null {
+  const value = (event as { model?: unknown })?.model
+  if (!value) return null
+  if (typeof value === "string") return { id: value }
+  if (typeof value === "object") {
+    const row = value as Record<string, unknown>
+    const id = typeof row.id === "string" ? row.id : typeof row.modelID === "string" ? row.modelID : undefined
+    const provider =
+      typeof row.providerID === "string" ? row.providerID : typeof row.provider === "string" ? row.provider : undefined
+    if (id) return { id, provider }
+  }
+  return null
+}
+
+function agentOf(event: unknown): string | undefined {
+  const value = (event as { agent?: unknown })?.agent
+  if (typeof value === "string") return value
+  if (value && typeof value === "object") {
+    const id = (value as { id?: unknown }).id
+    if (typeof id === "string") return id
+  }
+  return undefined
+}
+
 function skillDoc(id: string, description: string, body: string): string {
   const desc = (description || id).replace(/\s+/g, " ").trim()
   const inner = String(body || "").replace(/^\uFEFF/, "").replace(/^\s*\n/, "")
@@ -120,6 +155,10 @@ export async function mount(ctx: Plugin.Context): Promise<Cleanup> {
   const projectDir = str((ctx.location as { directory?: unknown } | undefined)?.directory) ?? process.cwd()
   const skillsRoot = str(options.skillsDir) ?? join(projectDir, ".opencode", "skills")
 
+  // 运行时观测：最近一次请求看到的模型 / agent（不落盘, 供面板显示与绑定校验）。
+  let lastModel: string | null = null
+  let lastAgent: string | null = null
+
   const installedSkills = (): string[] => {
     try {
       return readdirSync(skillsRoot)
@@ -158,9 +197,38 @@ export async function mount(ctx: Plugin.Context): Promise<Cleanup> {
       const rules = state.rules.filter((item) => item.id !== id)
       const removed = rules.length !== state.rules.length
       const activeRule = state.activeRule === id ? null : state.activeRule
-      state = normalizeState({ ...state, rules, activeRule })
+      const bindings = pruneBindings(state.bindings, id)
+      state = normalizeState({ ...state, rules, activeRule, bindings })
       await persist()
       return { removed, state }
+    },
+    duplicateRule: async (id, newId) => {
+      const source = state.rules.find((rule) => rule.id === id)
+      if (!source) return { ok: false, error: `方案不存在: ${id}`, state }
+      if (!SKILL_ID.test(newId)) return { ok: false, error: "newId 必须是 kebab-case", state }
+      const copy: PurgeRule = { id: newId, name: newId, content: source.content, updatedAt: Date.now() }
+      state = normalizeState({ ...state, rules: [...state.rules.filter((r) => r.id !== newId), copy] })
+      await persist()
+      return { ok: true, state }
+    },
+    renameRule: async (id, name) => {
+      const source = state.rules.find((rule) => rule.id === id)
+      if (!source) return { ok: false, error: `方案不存在: ${id}`, state }
+      state = normalizeState({
+        ...state,
+        rules: state.rules.map((rule) => (rule.id === id ? { ...rule, name: name.trim() || rule.id, updatedAt: Date.now() } : rule)),
+      })
+      await persist()
+      return { ok: true, state }
+    },
+    setBinding: async (kind, key, schemeId) => {
+      const table = { ...(kind === "model" ? state.bindings.model : state.bindings.agent) }
+      if (schemeId) table[key] = schemeId
+      else delete table[key]
+      const bindings = kind === "model" ? { ...state.bindings, model: table } : { ...state.bindings, agent: table }
+      state = normalizeState({ ...state, bindings })
+      await persist()
+      return state
     },
     apply: async () => {
       state = normalizeState({ ...state, enabled: true })
@@ -168,7 +236,14 @@ export async function mount(ctx: Plugin.Context): Promise<Cleanup> {
       return state
     },
     revert: async () => {
-      state = normalizeState({ ...state, customText: null, activeRule: null, policy: "fallback", cwdSelections: [] })
+      state = normalizeState({
+        ...state,
+        customText: null,
+        activeRule: null,
+        policy: "fallback",
+        cwdSelections: [],
+        bindings: { model: {}, agent: {} },
+      })
       await persist()
       return state
     },
@@ -260,11 +335,16 @@ export async function mount(ctx: Plugin.Context): Promise<Cleanup> {
     },
   }
 
-  const profile = () =>
-    buildProfile({
+  const profile = () => {
+    const [provider, modelID] = lastModel ? lastModel.split("/") : [undefined, undefined]
+    return buildProfile({
       version: PLUGIN_VERSION,
       state,
-      resolved: resolveInjectText(state, DEFAULT_PROMPT, readSelectedCwdInject(state.cwdSelections, projectDir)),
+      resolved: resolveInjectText(state, DEFAULT_PROMPT, readSelectedCwdInject(state.cwdSelections, projectDir), {
+        model: modelID,
+        provider,
+        agent: lastAgent ?? undefined,
+      }),
       hostFeatures: HOST_FEATURES,
       injectActive: inject,
       installedSkills: installedSkills(),
@@ -273,7 +353,10 @@ export async function mount(ctx: Plugin.Context): Promise<Cleanup> {
         .map((line) => line.trim())
         .filter((line) => line && !line.startsWith("#")),
       cwd: scanCwdInstructions(projectDir).map((item) => ({ path: item.path, scope: item.scope, size: item.size })),
+      lastModel,
+      lastAgent,
     })
+  }
 
   const registrations: Array<{ dispose: () => Promise<void> | void }> = []
 
@@ -281,10 +364,18 @@ export async function mount(ctx: Plugin.Context): Promise<Cleanup> {
   if (inject) {
     registrations.push(
       await ctx.session.hook("context", (event) => {
+        const model = modelOf(event)
+        const agent = agentOf(event)
+        if (model) lastModel = model.provider ? `${model.provider}/${model.id}` : model.id
+        if (agent) lastAgent = agent
         const cwdText = readSelectedCwdInject(state.cwdSelections, projectDir)
         const parts = buildSystemParts({
           state,
-          resolved: resolveInjectText(state, DEFAULT_PROMPT, cwdText),
+          resolved: resolveInjectText(state, DEFAULT_PROMPT, cwdText, {
+            model: model?.id,
+            provider: model?.provider,
+            agent,
+          }),
           redteam,
           redteamChild,
           pluginID: PLUGIN_ID,

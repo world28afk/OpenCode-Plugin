@@ -48,10 +48,16 @@ export const PurgeStatus = {
         type: "object",
         additionalProperties: false,
         properties: {
-          action: { type: "string", enum: ["list", "upsert", "delete", "activate", "deactivate"] },
+          action: {
+            type: "string",
+            enum: ["list", "use", "save", "duplicate", "rename", "delete", "bind", "unbind", "reset", "activate", "deactivate", "upsert"],
+          },
           id: { type: "string" },
           name: { type: "string" },
           content: { type: "string" },
+          newId: { type: "string" },
+          kind: { type: "string", enum: ["model", "agent"] },
+          key: { type: "string" },
         },
       },
       output: looseObject,

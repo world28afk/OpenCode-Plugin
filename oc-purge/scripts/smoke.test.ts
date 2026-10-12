@@ -179,14 +179,54 @@ describe("oc-purge mount", () => {
     expect(systemOf(harness.hooks[0]!).map((part) => part.metadata?.slot)).toEqual(["oc-purge:capabilities"])
   })
 
-  test("purge_rules: upsert + activate drives injection", async () => {
+  test("purge_rules: save + use drives injection (one-click switching)", async () => {
     const harness = makeContext()
     await mount(harness.ctx)
     const tool = harness.tools.find((item) => item.name === "purge_rules")!
-    await tool.execute({ action: "upsert", id: "alpha", name: "Alpha", content: "RULE-ALPHA" })
-    await tool.execute({ action: "activate", id: "alpha" })
+    await tool.execute({ action: "save", id: "alpha", name: "Alpha", content: "RULE-ALPHA" })
+    await tool.execute({ action: "use", id: "alpha" })
     expect(systemOf(harness.hooks[0]!)[0]!.text).toBe("RULE-ALPHA")
-    expect(readJson(await tool.execute({ action: "list" })).active).toBe("alpha")
+    const status = readJson(await tool.execute({ action: "list" }))
+    expect(status.activeScheme.id).toBe("alpha")
+    expect(status.schemes).toHaveLength(1)
+    expect(status.promptSource).toBe("rule")
+  })
+
+  test("model binding overrides the active scheme for that model", async () => {
+    const harness = makeContext()
+    await mount(harness.ctx)
+    const tool = harness.tools.find((item) => item.name === "purge_rules")!
+    await tool.execute({ action: "save", id: "base", name: "Base", content: "SCHEME-BASE" })
+    await tool.execute({ action: "save", id: "opus", name: "Opus", content: "SCHEME-OPUS" })
+    await tool.execute({ action: "use", id: "base" })
+    await tool.execute({ action: "bind", kind: "model", key: "google/claude-opus-4", id: "opus" })
+
+    const event = { system: [] as SystemPart[], model: { providerID: "google", id: "claude-opus-4" } }
+    harness.hooks[0]!.callback(event as never)
+    expect(event.system[0]!.text).toBe("SCHEME-OPUS")
+    expect(event.system[0]!.metadata).toMatchObject({ origin: "binding" })
+
+    const other = { system: [] as SystemPart[], model: { providerID: "ds", id: "deepseek-flash" } }
+    harness.hooks[0]!.callback(other as never)
+    expect(other.system[0]!.text).toBe("SCHEME-BASE")
+
+    const status = readJson(await tool.execute({ action: "list" }))
+    expect(status.bindings.model["google/claude-opus-4"]).toBe("opus")
+  })
+
+  test("purge_rules: duplicate / rename / delete", async () => {
+    const harness = makeContext()
+    await mount(harness.ctx)
+    const tool = harness.tools.find((item) => item.name === "purge_rules")!
+    await tool.execute({ action: "save", id: "a", name: "A", content: "AAA" })
+    const dup = readJson(await tool.execute({ action: "duplicate", id: "a", newId: "b" }))
+    expect(dup.ok).toBe(true)
+    await tool.execute({ action: "rename", id: "b", name: "Bee" })
+    const listed = readJson(await tool.execute({ action: "list" }))
+    expect(listed.schemes.map((s: { id: string; name: string }) => `${s.id}:${s.name}`)).toEqual(["a:A", "b:Bee"])
+    await tool.execute({ action: "bind", kind: "model", key: "m", id: "b" })
+    await tool.execute({ action: "delete", id: "b" })
+    expect(readJson(await tool.execute({ action: "list" })).bindings.model.m).toBeUndefined()
   })
 
   test("purge_servers: normalization drops keys / ranges / wildcards", async () => {
@@ -248,7 +288,7 @@ describe("oc-purge mount", () => {
     expect(updated.policy).toBe("strict")
     expect(updated.servers.hosts).toEqual(["198.51.100.7"])
     const rules = (await harness.rpc().handlers!.rules!({ action: "list" })) as Record<string, any>
-    expect(Array.isArray(rules.rules)).toBe(true)
+    expect(Array.isArray(rules.schemes)).toBe(true)
   })
 
   test("degraded host (no session/tool/rpc/storage): loads as no-op", async () => {

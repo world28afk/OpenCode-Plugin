@@ -2,7 +2,7 @@
 // 对齐上游 dsh-purge 的状态输出 (surface / 补丁清单), 换成 OpenCode 的等价面。
 
 import { BUNDLED_SKILLS } from "./skills"
-import { DEFAULT_PROMPT_SHA256 } from "./prompts"
+import { DEFAULT_PROMPT, DEFAULT_PROMPT_SHA256 } from "./prompts"
 import { CAPABILITY_SLOT, GLOBAL_PROMPT_ORDER, INJECT_SLOT, POST_SLOT, type PurgeState, type ResolvedInject } from "./config"
 
 export interface ProfileInput {
@@ -14,6 +14,8 @@ export interface ProfileInput {
   readonly installedSkills?: readonly string[]
   readonly servers?: readonly string[]
   readonly cwd?: readonly { path: string; scope: string; size: number }[]
+  readonly lastModel?: string | null
+  readonly lastAgent?: string | null
 }
 
 export function buildProfile(input: ProfileInput): Record<string, unknown> {
@@ -67,11 +69,22 @@ export function buildProfile(input: ProfileInput): Record<string, unknown> {
       },
     ],
     promptSource: resolved.source,
+    schemeId: resolved.schemeId,
     defaultPromptSha256: DEFAULT_PROMPT_SHA256,
+    defaultPromptBytes: DEFAULT_PROMPT.length,
     customTextBytes: state.customText ? state.customText.length : 0,
-    activeRule: activeRule ? { id: activeRule.id, name: activeRule.name, bytes: activeRule.content.length } : null,
+    activeScheme: activeRule ? { id: activeRule.id, name: activeRule.name, bytes: activeRule.content.length } : null,
+    activeSchemeText: activeRule ? activeRule.content : "",
     ruleCount: state.rules.length,
-    rules: state.rules.map((rule) => ({ id: rule.id, name: rule.name, bytes: rule.content.length })),
+    schemes: state.rules.map((rule) => ({
+      id: rule.id,
+      name: rule.name,
+      bytes: rule.content.length,
+      preview: rule.content.replace(/\s+/g, " ").trim().slice(0, 90),
+    })),
+    bindings: state.bindings,
+    lastModel: input.lastModel ?? null,
+    lastAgent: input.lastAgent ?? null,
     policy: state.policy,
     capabilityProtocol: state.capabilityProtocol,
     servers: {

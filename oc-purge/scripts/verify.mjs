@@ -116,11 +116,15 @@ if (!runningUnderBun) {
     config.resolveInjectText(state({}), "DEFAULT").source === "default",
   )
   check(
-    "resolveInjectText: custom 优先于 rule",
+    "resolveInjectText: 启用方案优先于手写文本",
     config.resolveInjectText(
       state({ customText: "C", activeRule: "r1", rules: [{ id: "r1", name: "r1", content: "R", updatedAt: 0 }] }),
       "DEFAULT",
-    ).text === "C",
+    ).text === "R",
+  )
+  check(
+    "resolveInjectText: 无方案时使用手写文本",
+    config.resolveInjectText(state({ customText: "C" }), "DEFAULT").text === "C",
   )
   check(
     "resolveInjectText: strict 无用户文本 → none",
@@ -130,6 +134,20 @@ if (!runningUnderBun) {
     "resolveInjectText: always 追加默认资产",
     config.resolveInjectText(state({ policy: "always", customText: "H" }), "DEFAULT").text === "H\n\nDEFAULT",
   )
+  {
+    const bound = state({
+      activeRule: "a",
+      rules: [
+        { id: "a", name: "a", content: "A", updatedAt: 0 },
+        { id: "b", name: "b", content: "B", updatedAt: 0 },
+      ],
+      bindings: { model: { "x/y": "b" }, agent: {} },
+    })
+    const hit = config.resolveInjectText(bound, "DEFAULT", "", { model: "y", provider: "x" })
+    check("resolveInjectText: 模型绑定覆盖启用方案", hit.text === "B" && hit.source === "binding", `${hit.source}:${hit.text}`)
+    const miss = config.resolveInjectText(bound, "DEFAULT", "", { model: "z", provider: "x" })
+    check("resolveInjectText: 未绑定回落到启用方案", miss.text === "A" && miss.source === "rule")
+  }
 
   // 纯函数: ChatML 布局整理 + OpenCode 剥壳
   const normalized = inject.normalizeInjectLayout("<|im_start|>system:<project_instructions>\nHello")

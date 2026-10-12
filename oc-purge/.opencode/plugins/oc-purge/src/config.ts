@@ -35,13 +35,21 @@ export interface PurgeRule {
   readonly updatedAt: number
 }
 
+/** 模型/agent → 方案 的绑定（键为 `provider/model`、`model` 或 `agentId`）。 */
+export interface PurgeBindings {
+  readonly model: Readonly<Record<string, string>>
+  readonly agent: Readonly<Record<string, string>>
+}
+
 export interface PurgeState {
   readonly enabled: boolean
-  /** 等价 prompt-inject.md: 用户自定义注入正文。 */
+  /** 等价 prompt-inject.md 的「手写」模式：无方案启用时使用。 */
   readonly customText: string | null
-  /** 当前启用的规则集 id。 */
+  /** 当前启用的方案 id（等价 rules/ 的 active）。 */
   readonly activeRule: string | null
+  /** 提示词方案库（等价 rules/ 规则集；一键切换）。 */
   readonly rules: readonly PurgeRule[]
+  readonly bindings: PurgeBindings
   readonly policy: WorkspacePolicy
   readonly capabilityProtocol: boolean
   readonly postPrompt: string
@@ -52,6 +60,8 @@ export interface PurgeState {
   readonly cwdSelections: readonly string[]
   /** 首次使用告知是否已确认（等价上游 welcome notice）。 */
   readonly noticeAck: boolean
+  /** 最近一次模型调用看到的模型（`provider/model`），用于面板显示与绑定校验。 */
+  readonly lastModel: string | null
 }
 
 export const DEFAULT_STATE: PurgeState = {
@@ -59,6 +69,7 @@ export const DEFAULT_STATE: PurgeState = {
   customText: null,
   activeRule: null,
   rules: [],
+  bindings: { model: {}, agent: {} },
   policy: "fallback",
   capabilityProtocol: true,
   postPrompt: "",
@@ -66,6 +77,7 @@ export const DEFAULT_STATE: PurgeState = {
   serversText: "",
   cwdSelections: [],
   noticeAck: false,
+  lastModel: null,
 }
 
 function asText(value: unknown): string | null {
@@ -104,6 +116,22 @@ function normalizeSelections(raw: unknown): string[] {
   return out
 }
 
+function normalizeBindings(raw: unknown): PurgeBindings {
+  const input = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {}
+  const pick = (value: unknown): Record<string, string> => {
+    const out: Record<string, string> = {}
+    if (value && typeof value === "object") {
+      for (const [key, target] of Object.entries(value as Record<string, unknown>)) {
+        const k = String(key).trim()
+        const v = typeof target === "string" ? target.trim() : ""
+        if (k && v) out[k] = v
+      }
+    }
+    return out
+  }
+  return { model: pick(input.model), agent: pick(input.agent) }
+}
+
 /** 把任意持久化数据规整成合法状态（缺字段回退默认）。 */
 export function normalizeState(raw: unknown): PurgeState {
   const input = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {}
@@ -119,6 +147,7 @@ export function normalizeState(raw: unknown): PurgeState {
     customText: asText(input.customText),
     activeRule: typeof input.activeRule === "string" && input.activeRule.trim() ? input.activeRule.trim() : null,
     rules: normalizeRules(input.rules),
+    bindings: normalizeBindings(input.bindings),
     policy,
     capabilityProtocol: input.capabilityProtocol === false ? false : true,
     postPrompt: typeof input.postPrompt === "string" ? input.postPrompt : "",
@@ -126,42 +155,82 @@ export function normalizeState(raw: unknown): PurgeState {
     serversText: typeof input.serversText === "string" ? input.serversText : "",
     cwdSelections: normalizeSelections(input.cwdSelections),
     noticeAck: input.noticeAck === true,
+    lastModel: typeof input.lastModel === "string" && input.lastModel.trim() ? input.lastModel.trim() : null,
   }
 }
+
+export interface InjectSelector {
+  /** `provider/model` 或纯 model id。 */
+  readonly model?: string
+  readonly provider?: string
+  readonly agent?: string
+}
+
+/** 按选择器找命中的绑定方案 id（provider/model 精确 > model > agent）。 */
+export function boundSchemeId(state: PurgeState, selector: InjectSelector = {}): string | null {
+  const known = (id: string | undefined): string | null => (id && state.rules.some((r) => r.id === id) ? id : null)
+  if (selector.model) {
+    if (selector.provider) {
+      const full = known(state.bindings.model[`${selector.provider}/${selector.model}`])
+      if (full) return full
+    }
+    const byModel = known(state.bindings.model[selector.model])
+    if (byModel) return byModel
+  }
+  if (selector.agent) {
+    const byAgent = known(state.bindings.agent[selector.agent])
+    if (byAgent) return byAgent
+  }
+  return null
+}
+
+export type InjectSource = "custom" | "rule" | "binding" | "cwd" | "default" | "always" | "none"
 
 export interface ResolvedInject {
   /** 实际要注入的正文（可能为空字符串 = 本次不注入）。 */
   readonly text: string
   /** 来源标记, 便于审计/profile。 */
-  readonly source: "custom" | "rule" | "cwd" | "default" | "always" | "none"
+  readonly source: InjectSource
+  /** 命中的方案 id（若有）。 */
+  readonly schemeId: string | null
 }
 
 /**
- * 解析本次要注入的正文。defaultText 是内置默认提示词（由 src/prompts.ts 提供），
- * cwdText 是勾选的本地规则文件内容（CWD rules）。
- * 与上游注入决策等价: A 用户文本(prompt-inject/规则集) → B 本地 md → D 插件默认 (+ 策略)。
+ * 解析本次要注入的正文。
+ * 优先级（与上游 A→B→D + 策略 C 等价, 并新增「按模型绑定方案」）：
+ *   模型/agent 绑定方案 → 当前启用方案 → 手写文本 → 勾选本地规则 → 内置默认
  */
-export function resolveInjectText(state: PurgeState, defaultText: string, cwdText = ""): ResolvedInject {
-  const rule = state.activeRule ? state.rules.find((item) => item.id === state.activeRule) : undefined
-  const user = asText(state.customText) ?? asText(rule?.content) ?? asText(cwdText)
-  const source: ResolvedInject["source"] = state.customText
-    ? "custom"
-    : asText(rule?.content)
+export function resolveInjectText(
+  state: PurgeState,
+  defaultText: string,
+  cwdText = "",
+  selector: InjectSelector = {},
+): ResolvedInject {
+  const find = (id: string | null | undefined) => (id ? state.rules.find((item) => item.id === id) : undefined)
+  const binding = boundSchemeId(state, selector)
+  const rule = find(binding) ?? find(state.activeRule)
+  const user = asText(rule?.content) ?? asText(state.customText) ?? asText(cwdText)
+  const source: InjectSource = binding
+    ? "binding"
+    : rule
       ? "rule"
-      : asText(cwdText)
-        ? "cwd"
-        : "none"
+      : asText(state.customText)
+        ? "custom"
+        : asText(cwdText)
+          ? "cwd"
+          : "none"
+  const schemeId = rule?.id ?? null
 
   if (state.policy === "strict") {
-    if (user) return { text: user, source }
-    return { text: "", source: "none" }
+    if (user) return { text: user, source, schemeId }
+    return { text: "", source: "none", schemeId: null }
   }
 
   if (state.policy === "always") {
     const merged = user ? `${user}\n\n${defaultText}` : defaultText
-    return { text: merged, source: "always" }
+    return { text: merged, source: "always", schemeId }
   }
 
-  if (user) return { text: user, source }
-  return { text: defaultText, source: "default" }
+  if (user) return { text: user, source, schemeId }
+  return { text: defaultText, source: "default", schemeId: null }
 }

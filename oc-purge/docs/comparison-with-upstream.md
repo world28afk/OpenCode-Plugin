@@ -69,9 +69,11 @@
 - 新增工具 `purge_apply` / `purge_revert`（对齐上游同名工具语义：应用=开注入、复原=回落内置默认）。
 - 新增 `purge_servers`（Own servers 白名单）、`purge_cwd`（CWD rules 扫描/勾选）。
 - `purge_skills` 扩展为 `list｜install｜import｜create｜delete`（对齐 `/skills`）。
+- `purge_rules` 升级为**提示词方案**：`use`（一键切换）／`save`／`duplicate`／`rename`／`delete`／
+  `bind`／`unbind`／`reset`；新增 **模型/agent → 方案 绑定**（上游 README 的「不同模型可换不同提示词」）。
 - 新增斜杠命令 `/purge` `/rules` `/skills` 动态注册（能力探测 + try/catch 降级）。
 - RPC 由 `get/set` 扩展为 `get｜set｜apply｜revert｜rules｜skills｜servers｜cwd`。
-- 注入决策加入 **本地规则(B)** 一层：customText(A) → 规则集(A) → CWD 勾选(B) → 内置默认(D)。
+- 注入决策加入 **模型绑定(B1)** 与 **本地规则(B)**：绑定 → 启用方案 → 手写 → CWD → 内置默认。
 
 桌面 dock：
 - 双页 Clean / Drill + Light / Ink 主题 + 首启告知 + Drill 三勾选授权门。
@@ -97,4 +99,8 @@
 | 生效方式 | Apply 后重启宿主 | `session.hook("context")` 每次调用生效，改完即用、无需重启 | 迁移指南 §4.5 |
 | 状态存储 | `$DSH_HOME` 文件 | 插件私有 `ctx.storage` | OpenCode 无宿主文件补丁面 |
 
-界面侧：dock 采用**数据签名驱动渲染**（只在数据变化时重建，编辑中不重建），修复了「反复重建导致按钮/输入框不可点击」的问题；并加入分区标题+说明、状态胶囊、操作结果提示（toast）、编辑字符计数，功能更清晰。
+界面侧：dock **重做为现代卡片式（大厂风格）**，并修复「反复重建导致按钮/输入框不可点击」的问题——
+改为**数据签名驱动渲染**（只在数据变化时重建、编辑中不重建、重建保留输入与滚动）。
+面板结构：顶部品牌 + 当前模型/来源；Clean / Drill 分段标签；状态胶囊；
+卡片分区（快速操作 / 提示词方案 / 提示词内容 / 模型绑定 / 自己的服务器 / 本地规则 / 技能 / 连接）；
+每张卡都有标题与一句说明，操作结果以 toast 反馈。

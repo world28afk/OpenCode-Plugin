@@ -96,10 +96,17 @@ node .\oc-purge\scripts\patch-desktop.mjs
 | `purge_apply` | 开注入并应用（等价上游 `purge_apply`） |
 | `purge_revert` | 回落内置默认（清自定义文本/激活规则，等价上游 `purge_revert`） |
 | `purge_inject` | `enable`·`disable`·`set-text`·`clear-text`·`set-policy`·`set-post`·`set-capability` |
-| `purge_rules` | `list`·`upsert`·`delete`·`activate`·`deactivate`（等价 `/rules`） |
+| `purge_rules` | 提示词方案（一键切换）：`list`·`use`·`save`·`duplicate`·`rename`·`delete`·`bind`·`unbind`·`reset` |
 | `purge_skills` | `list`·`install`·`import`·`create`·`delete`（等价 `/skills`） |
 | `purge_servers` | `list`·`set`（Own servers 白名单） |
 | `purge_cwd` | `scan`·`select`·`deselect`·`clear`（CWD rules） |
+
+**提示词方案（一键切换）**：方案＝上游的规则集（`rules/`）。桌面面板点方案即切换；
+`bind` 可把「模型 / agent」映射到方案，实现上游 README 的卖点「不同模型可换不同提示词」：
+```
+匹配顺序：provider/model → model → agent
+命中绑定 → 当前启用方案 → 手写文本 → 勾选本地规则 → 内置默认
+```
 
 斜杠命令（宿主提供 `command.transform` 时注册）：`/purge`、`/rules`、`/skills`。
 
@@ -110,7 +117,7 @@ POST /api/rpc/purge.status/rules       {"input":{"action":"activate","id":"alpha
 POST /api/rpc/purge.status/servers     {"input":{"action":"set","text":"203.0.113.10"}}
 ```
 
-**注入解析优先级**：`customText`(A) → 激活规则集(A) → 勾选的本地规则(B) → 内置默认资产(D)；
+**注入解析优先级**：命中的「模型绑定」→ 当前启用方案 → 手写文本 → 勾选本地规则 → 内置默认资产；
 策略 `fallback`（默认）/ `strict`（只用用户文本）/ `always`（用户文本后追加默认）。
 
 > 与上游的完整界面/功能差异对照（含 N/A 原因）见
