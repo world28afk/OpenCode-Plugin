@@ -42,15 +42,19 @@ Windows 的 `.mjs` 补丁工具依赖 Node + npx；macOS（或任何没有 Node 
 ```bash
 python3 scripts/patch-desktop.py --dry-run                # 验证（不改动安装）
 python3 scripts/patch-desktop.py                          # 注入（自动备份, 原子替换）
+python3 scripts/patch-desktop.py --in-place               # 桌面端仍开着时原地热更新（重启后生效）
 python3 scripts/patch-desktop.py --only oc-purge          # 只处理指定插件
 python3 scripts/patch-desktop.py --unpatch                # 移除注入（可跟插件名）
 python3 scripts/patch-desktop.py --restore                # 从备份还原
 ```
 
 - 默认安装路径：macOS `/Applications/OpenCode.app/Contents/Resources/app.asar`；
-  Windows `%LOCALAPPDATA%\Programs\@opencodedesktop\resources\app.asar`；也可 `--app` 指定（支持打在副本上先验证）。
+  Windows `%LOCALAPPDATA%\Programs\ai.opencode.desktop\resources\app.asar`；也可 `--app` 指定（支持打在副本上先验证）。
 - 与 `.mjs` 完全互相兼容：相同标签/插入位置/备份文件名，可交叉 `--restore` / `--unpatch`。
 - 追加式改写（旧数据区原样保留），运行中的桌面端不受影响，重启后生效；重复执行安全（不产生重复标签）。
+- 默认走「临时文件 + 原子替换」，桌面端运行中会因文件占用失败；此时加 `--in-place`
+  原地热更新：先追加数据区、再覆盖 header、最后校正长度，且强制要求 header 区块长度不变
+  （否则已有条目偏移会错位，脚本会直接拒绝并提示退出桌面端后重试）。
 - macOS 若重开后被系统报「已损坏」：`xattr -dr com.apple.quarantine /Applications/OpenCode.app`。
 - 适用范围：renderer 注入插件（`oc-cyberbot` / `oc-deepseek-banlance` / `oc-plugin-manager` / `oc-purge`；
   `oc-infinite-gen-4` 已停用不再注入）；

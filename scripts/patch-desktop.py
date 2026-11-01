@@ -121,7 +121,15 @@ def default_app_asar():
         return Path("/Applications/OpenCode.app/Contents/Resources/app.asar")
     if os.name == "nt":
         local = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
-        return Path(local) / "Programs" / "@opencodedesktop" / "resources" / "app.asar"
+        # 新版桌面版目录改为 ai.opencode.desktop，旧版为 @opencodedesktop；按存在性优先探测
+        candidates = [
+            Path(local) / "Programs" / "ai.opencode.desktop" / "resources" / "app.asar",
+            Path(local) / "Programs" / "@opencodedesktop" / "resources" / "app.asar",
+        ]
+        for candidate in candidates:
+            if candidate.exists():
+                return candidate
+        return candidates[0]
     return None
 
 
@@ -391,19 +399,48 @@ def run(args):
                 shutil.copy2(app, backup)
                 print(f"已备份  : {backup}")
 
-    tmp = app.parent / f".{app.name}.tmp-{os.getpid()}.asar"
-    try:
-        tmp.write_bytes(patched)
-    except OSError as exc:
-        fail(f"无法在安装目录写入临时文件: {exc}")
-    try:
-        os.replace(tmp, app)
-    except PermissionError:
+    if args.in_place:
+        # 原地热更新：仅在 header 区块长度不变时安全（已有条目的 offset 全部保留）。
+        # 顺序 = 先追加数据区（旧 header 仍然有效）→ 再覆盖 header → 最后校正长度，
+        # 因此运行中的桌面端在重启前仍读到旧 index.html，不会读到错位内容。
+        if args.unpatch is not None:
+            fail("--in-place 只支持注入模式")
+        header_block = patched[:data_start]
+        appended = patched[len(blob):]
+        if len(header_block) != data_start:
+            fail(
+                "header 区块长度发生变化（本次注入改变了 header 大小），"
+                "原地热更新不安全：请完全退出 OpenCode Desktop 后重新执行"
+            )
         try:
-            tmp.unlink()
-        except OSError:
-            pass
-        fail("写入失败（文件被占用）。请完全退出 OpenCode Desktop 后重试")
+            with open(app, "r+b") as fh:
+                fh.seek(len(blob))
+                fh.write(appended)
+                fh.flush()
+                fh.seek(0)
+                fh.write(header_block)
+                fh.truncate(len(blob) + len(appended))
+                fh.flush()
+        except OSError as exc:
+            fail(f"原地写入失败: {exc}")
+        print(f"原地热更新: 追加 {len(appended)} 字节（header 长度未变, 已有条目偏移全部保留）")
+    else:
+        tmp = app.parent / f".{app.name}.tmp-{os.getpid()}.asar"
+        try:
+            tmp.write_bytes(patched)
+        except OSError as exc:
+            fail(f"无法在安装目录写入临时文件: {exc}")
+        try:
+            os.replace(tmp, app)
+        except PermissionError:
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+            fail(
+                "写入失败（文件被占用）。请完全退出 OpenCode Desktop 后重试；"
+                "或在桌面端运行时加 --in-place 做原地热更新"
+            )
 
     checks = validate(app.read_bytes(), targets, validate_mode)
     for label, ok in checks:
@@ -426,6 +463,11 @@ def main():
     )
     parser.add_argument("--app", help="指定 app.asar 路径（默认按平台探测）")
     parser.add_argument("--dry-run", action="store_true", help="只验证, 不改动安装")
+    parser.add_argument(
+        "--in-place",
+        action="store_true",
+        help="桌面端仍在运行时原地热更新（追加式, 已有条目偏移不变, 重启后生效）",
+    )
     parser.add_argument("--restore", action="store_true", help="从首次备份还原")
     parser.add_argument(
         "--unpatch",

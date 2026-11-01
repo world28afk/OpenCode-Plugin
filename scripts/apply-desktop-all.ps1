@@ -17,7 +17,11 @@ $log = Join-Path $env:TEMP "oc-desktop-apply-all.log"
 function Log($m) { "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $m" | Add-Content -Path $log -Encoding UTF8; Write-Output $m }
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path | Split-Path -Parent
-$appDir = Join-Path $env:LOCALAPPDATA "Programs\@opencodedesktop"
+$appDir = @(
+  (Join-Path $env:LOCALAPPDATA "Programs\ai.opencode.desktop"),
+  (Join-Path $env:LOCALAPPDATA "Programs\@opencodedesktop")
+) | Where-Object { Test-Path (Join-Path $_ "OpenCode.exe") } | Select-Object -First 1
+if (-not $appDir) { throw "未找到 OpenCode 桌面版安装目录（ai.opencode.desktop / @opencodedesktop）" }
 $exe = Join-Path $appDir "OpenCode.exe"
 
 function Stop-Desktop {
