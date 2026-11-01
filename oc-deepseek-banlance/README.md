@@ -8,7 +8,8 @@
 
 | 位置 | 实现 | 验证 |
 | :--- | :--- | :--- |
-| **桌面端右上角「上下文小圆圈」悬浮提示** | `desktop/oc-balance-inject.js`（DOM 注入，追加「余额 ¥xx.xx」行） | ✅ 桌面端 2.0.22 实测（自动探测端口 + Electron main 自动认证） |
+| **桌面端右上角「上下文小圆圈」右侧** | `desktop/oc-balance-inject.js`（DOM 注入，圆圈按钮后插入「余额 ¥xx.xx」徽标，点击刷新） | ✅ OpenCode 2.2.5 结构反查 + 无头 DOM 复刻 12 项断言通过 |
+| **该圆圈悬浮提示内的「余额」行** | 同上（`role="dialog"` 内容区追加一行，位于分隔线之前） | ✅ 同上 |
 | **审查页（Review）「上下文」页** | 同上（统计网格追加「余额」卡片 + 明细卡） | ✅ 桌面端实测显示「余额 ¥15.xx」+ 明细卡 |
 | TUI 状态条「💠 余额 ¥xx.xx」 | `tui.tsx` → `prompt.footer.status` 槽位 | ✅ |
 | TUI `/balance` 命令 + 余额面板 | `tui.tsx` → keymap + `session.panel` | ✅ |
@@ -36,7 +37,7 @@ DeepSeek GET /user/balance
         │ 同源 HTTP (登录态复用, 不暴露 Key)
    ┌────┴─────────────┬───────────────┐
    │ Desktop/Web 注入  │ TUI 插件       │ 其它客户端 (RPC)
-   │ 圆圈提示+上下文页  │ 状态条+面板     │
+   │ 圆圈徽标+上下文页  │ 状态条+面板     │
    └──────────────────┴───────────────┘
 ```
 
@@ -68,6 +69,9 @@ node scripts/patch-desktop.mjs --dry-run   # 先验证（不改动安装）
 # 完全退出 OpenCode Desktop（含托盘）后:
 node scripts/patch-desktop.mjs             # 注入 app.asar（自动备份 .oc-balance.bak）
 node scripts/patch-desktop.mjs --restore   # 一键还原
+
+# 不想退出桌面端时（Windows 文件占用会让原子替换失败）: 用根目录 Python 版原地热更新
+python scripts/patch-desktop.py --in-place --only oc-deepseek-banlance   # 重启桌面端后生效
 ```
 
 ## 插件选项
@@ -85,7 +89,7 @@ node scripts/patch-desktop.mjs --restore   # 一键还原
 ## 回归校验
 
 ```powershell
-bun scripts/verify.mjs        # 37 项（布局/静态检查/构建/注入脚本语法/冒烟）
+bun scripts/verify.mjs        # 35 项（布局/静态检查/构建/注入脚本语法/冒烟）
 bun test scripts/smoke.test.ts  # 15 项（key 解析/余额解析/缓存/事件/挂载/降级）
 ```
 

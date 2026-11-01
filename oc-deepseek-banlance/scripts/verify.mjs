@@ -97,7 +97,13 @@ if (existsSync(injectPath)) {
   check("injector calls plugin RPC path", inject.includes("/api/rpc/${RPC_ID}/get"))
   check("injector wraps RPC payload as { input }", inject.includes("JSON.stringify({ input: {} })"))
   check("injector reads RPC { output } wrapper", inject.includes("json.output"))
-  check("injector targets context tooltip (w-[120px])", inject.includes("w-[120px]"))
+  check(
+    "injector anchors header circle (session-header-actions + progress-circle)",
+    inject.includes('svg[data-component="progress-circle"][data-appearance="indicator"]') &&
+      inject.includes(".session-header-actions"),
+  )
+  check("injector mounts badge right of circle (insertAdjacentElement afterend)", inject.includes('insertAdjacentElement("afterend", badge)'))
+  check("injector targets 2.2.x tooltip dialog rows", inject.includes("div.h-7.items-center.gap-4"))
   check("injector targets context page grid", inject.includes("grid-cols-2"))
   check("injector uses MutationObserver", inject.includes("MutationObserver"))
   check("injector has direct DeepSeek fallback", inject.includes("api.deepseek.com/user/balance"))

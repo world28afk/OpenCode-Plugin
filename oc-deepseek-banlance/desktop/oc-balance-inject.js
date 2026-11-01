@@ -2,8 +2,9 @@
  * oc-deepseek-banlance — Desktop / Web UI bridge (桌面端注入脚本)
  *
  * 作用: 在 OpenCode Desktop / Web UI 中把 DeepSeek 余额显示到
- *   1) 右上角「上下文小圆圈」的悬浮提示 (上下文工具提示) 内;
- *   2) 审查页 (Review panel) 的「上下文」页 内。
+ *   1) 右上角「上下文小圆圈」的**右侧** (紧贴圆圈按钮的兄弟节点, 2.2.x 新布局);
+ *   2) 该圆圈悬浮提示 (tokens / 成本 / 使用率 之后追加一行余额);
+ *   3) 审查页 (Review panel) 的「上下文」页 内。
  *
  * 数据来源 (按顺序尝试):
  *   1. 服务端插件 RPC: POST {base}/api/rpc/deepseek.balance.v1/get
@@ -23,7 +24,7 @@
 
   if (window.__ocDeepSeekBalance) return
 
-  const VERSION = "0.2.1"
+  const VERSION = "0.3.0"
   const LS_KEY = "oc-deepseek-balance:apiKey"
   const LS_BASE = "oc-deepseek-balance:serverBase"
   const RPC_ID = "deepseek.balance.v1"
@@ -75,6 +76,26 @@
       }
     } catch {}
     return Array.from(new Set(found))
+  }
+
+  /**
+   * 新版桌面端 sidecar 端口动态分配，固定端口表会失效。
+   * 渲染进程自己在请求这个端口（/api/config 等），直接读 Resource Timing 的 origin 最准。
+   */
+  function ocPerfOrigins() {
+    const apiHits = []
+    const others = []
+    try {
+      for (const entry of performance.getEntriesByType("resource")) {
+        const url = entry && entry.name
+        if (!url || !/^https?:\/\//i.test(url)) continue
+        const match = url.match(/^(https?:\/\/[^/?#]+)/i)
+        if (!match) continue
+        if (url.indexOf("/api/") !== -1) apiHits.push(match[1])
+        else others.push(match[1])
+      }
+    } catch {}
+    return Array.from(new Set([...apiHits, ...others]))
   }
 
 
@@ -143,6 +164,7 @@
       if (typeof bootstrap.defaultServerUrl === "string") candidates.push(stripBase(bootstrap.defaultServerUrl))
       if (typeof bootstrap.serverUrl === "string") candidates.push(stripBase(bootstrap.serverUrl))
     }
+    for (const ocBase of ocPerfOrigins()) candidates.push(stripBase(ocBase))
     for (const ocBase of ocCapturedOrigins()) candidates.push(stripBase(ocBase))
     for (const ocBase of ocStorageOrigins()) candidates.push(stripBase(ocBase))
     for (const port of DESKTOP_PORTS) candidates.push(`http://127.0.0.1:${port}`)
@@ -178,8 +200,6 @@
     if (!basePromise) {
       basePromise = (async () => {
         if (/^https?:/.test(location.origin)) return location.origin
-        const ocCaptured = ocCapturedOrigins()[0]
-        if (ocCaptured) return ocCaptured
         if (!isDesktop()) return null
         const base = await probeBase()
         // 失败不缓存: 应用可能尚未完成服务连接, 下次刷新重试
@@ -307,29 +327,100 @@
   }
 
   // ── UI 注入 ──────────────────────────────────────────────────────────────
+  //
+  // 2.2.x 结构 (来自 out/renderer/assets/main-*.js 的 Z3t 组件):
+  //   .session-header-actions
+  //     └ button[aria-label="查看上下文用量"]        ← 右上角「上下文小圆圈」的触发器
+  //         └ svg[data-component="progress-circle"][data-appearance="indicator"]
+  // 余额直接作为该 button 的**兄弟节点**挂在右侧, 不再依赖旧版 w-[120px] 悬浮容器。
 
+  const CIRCLE_SVG = 'svg[data-component="progress-circle"][data-appearance="indicator"]'
+
+  /** 右上角圆圈按钮: 只在 session header 的动作区里找, 避开标签栏里的同名圆圈。 */
+  function findCircleButton() {
+    const actions = document.querySelector(".session-header-actions")
+    if (actions) {
+      for (const svg of actions.querySelectorAll(CIRCLE_SVG)) {
+        const button = svg.closest("button")
+        if (button) return button
+      }
+      return null
+    }
+    // 兜底: 头部容器改名时全局找, 但排除标签栏里的同名圆圈
+    for (const svg of document.querySelectorAll(CIRCLE_SVG)) {
+      const button = svg.closest("button")
+      if (!button) continue
+      if (button.closest('[role="tab"],[data-slot="tab-link"],[data-slot="tabs-v"],[data-slot="vertical-tabs-mount"]')) continue
+      return button
+    }
+    return null
+  }
+
+  /** 圆圈右侧的余额徽标。 */
+  function ensureHeaderBadge() {
+    const circle = findCircleButton()
+    if (!circle) return
+    const parent = circle.parentElement
+    if (!parent) return
+
+    let badge = parent.querySelector(`[${MARK}="badge"]`)
+    if (!badge) {
+      badge = document.createElement("span")
+      badge.setAttribute(MARK, "badge")
+      badge.className =
+        "inline-flex shrink-0 cursor-pointer select-none items-center gap-1 whitespace-nowrap px-1 " +
+        "text-[12px] leading-none tracking-[-0.04px] text-v2-text-text-faint transition-colors " +
+        "hover:text-v2-text-text-muted"
+      const label = document.createElement("span")
+      label.className = "text-v2-text-text-muted"
+      label.textContent = LABEL
+      const value = document.createElement("span")
+      value.className = "tabular-nums text-v2-text-text-base"
+      badge.append(label, value)
+      badge.addEventListener("click", (event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        void refresh()
+      })
+      circle.insertAdjacentElement("afterend", badge)
+    } else if (badge.previousElementSibling !== circle) {
+      // Solid 重渲染后可能换了位置, 拉回圆圈右侧
+      circle.insertAdjacentElement("afterend", badge)
+    }
+
+    const value = badge.lastElementChild
+    if (value) value.textContent = compact(state.snapshot)
+    badge.title = `${detailText(state.snapshot)}\n点击刷新`
+  }
+
+  /** 新版悬浮层: role=dialog 的内容区里追加「余额」行 (样式对齐 usage 行)。 */
   function ensureTooltipRow() {
-    const containers = document.querySelectorAll('[class*="w-[120px]"]')
-    for (const container of containers) {
-      if (!container.querySelector(`[${MARK}="tooltip"]`)) {
-        const row = document.createElement("div")
-        row.className = "flex min-w-0 items-center gap-4"
-        row.setAttribute(MARK, "tooltip")
+    const rows = document.querySelectorAll("div.h-7.items-center.gap-4")
+    for (const row of rows) {
+      const content = row.parentElement
+      if (!content || content.getAttribute("role") !== "dialog") continue
+      if (row.children.length !== 2) continue
+
+      let mine = content.querySelector(`[${MARK}="tooltip"]`)
+      if (!mine) {
+        mine = document.createElement("div")
+        mine.className =
+          "flex h-7 min-w-0 items-center gap-4 px-3 text-[13px] font-[440] " +
+          "leading-[var(--line-height-compact)] tracking-[-0.04px]"
+        mine.setAttribute(MARK, "tooltip")
         const name = document.createElement("span")
         name.className = "shrink-0 text-v2-text-text-muted"
         name.textContent = LABEL
         const value = document.createElement("span")
-        value.className = "ml-auto min-w-0 truncate text-right text-v2-text-text-base"
+        value.className = "ml-auto min-w-0 truncate text-right tabular-nums text-v2-text-text-base"
+        mine.append(name, value)
+        const separator = content.querySelector('[role="separator"]')
+        content.insertBefore(mine, separator ?? content.lastElementChild)
+      }
+      const value = mine.lastElementChild
+      if (value) {
         value.textContent = compact(state.snapshot)
         value.title = detailText(state.snapshot)
-        row.append(name, value)
-        container.appendChild(row)
-      } else {
-        const value = container.querySelector(`[${MARK}="tooltip"] span:last-child`)
-        if (value) {
-          value.textContent = compact(state.snapshot)
-          value.title = detailText(state.snapshot)
-        }
       }
     }
   }
@@ -380,6 +471,7 @@
 
   function apply() {
     try {
+      ensureHeaderBadge()
       ensureTooltipRow()
       ensureContextStat()
     } catch {
@@ -390,12 +482,20 @@
   function schedule() {
     if (scheduled) return
     scheduled = true
+    let done = false
     const run = () => {
+      if (done) return
+      done = true
       scheduled = false
       apply()
     }
-    if (typeof requestAnimationFrame === "function" && !document.hidden) requestAnimationFrame(run)
-    else setTimeout(run, 16)
+    // 窗口被遮挡/最小化时 rAF 可能被节流甚至不触发, 加一次定时兜底
+    if (typeof requestAnimationFrame === "function" && !document.hidden) {
+      requestAnimationFrame(run)
+      setTimeout(run, 250)
+    } else {
+      setTimeout(run, 16)
+    }
   }
 
   // ── 生命周期 ────────────────────────────────────────────────────────────
@@ -451,7 +551,7 @@
   }
 
   console.info(
-    `[oc-deepseek-banlance] v${VERSION} 已注入。余额将显示在上下文圆圈提示与审查页-上下文页。` +
+    `[oc-deepseek-banlance] v${VERSION} 已注入。余额显示在右上角上下文圆圈右侧, 悬浮提示与审查页-上下文页同步显示。` +
       ` 未配置 Key 时可执行: ocDeepSeekBalance.setKey("sk-...")` +
       ` 桌面端端口探测失败时可执行: ocDeepSeekBalance.setServerBase("http://127.0.0.1:49374")`,
   )
