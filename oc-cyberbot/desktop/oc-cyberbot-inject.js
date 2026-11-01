@@ -71,8 +71,31 @@
     return Array.from(new Set(found))
   }
 
+  /**
+   * 新版桌面端 sidecar 端口是动态分配的，固定端口表与 localStorage 里的旧地址都会失效。
+   * 渲染进程自己就在跟这个端口通信（/api/session、/api/config 等），
+   * 所以直接读 Resource Timing 里的真实请求 origin，最准确且零额外网络开销。
+   */
+  function ocPerfOrigins() {
+    const apiHits = []
+    const others = []
+    try {
+      for (const entry of performance.getEntriesByType("resource")) {
+        const url = entry && entry.name
+        if (!url || !/^https?:\/\//i.test(url)) continue
+        const match = url.match(/^(https?:\/\/[^/?#]+)/i)
+        if (!match) continue
+        const origin = match[1]
+        if (url.indexOf("/api/") !== -1) apiHits.push(origin)
+        else others.push(origin)
+      }
+    } catch {}
+    return Array.from(new Set([...apiHits, ...others]))
+  }
+
   const REFRESH_MS = 15_000
   const TARGET_LABEL = "复制回复"
+  const COPIED_LABEL = "已复制"
   const KIND_LABEL = { text: "回复", reasoning: "思考" }
 
   const state = { enabled: false, lastError: null, serverBase: null, buttons: 0 }
@@ -136,6 +159,7 @@
     if (info.base) candidates.push(info.base)
     const boot = window.electron && window.electron.bootstrap
     if (boot && typeof boot === "object" && typeof boot.defaultServerUrl === "string") candidates.push(strip(boot.defaultServerUrl))
+    for (const ocBase of ocPerfOrigins()) candidates.push(strip(ocBase))
     for (const ocBase of ocCapturedOrigins()) candidates.push(strip(ocBase))
     for (const ocBase of ocStorageOrigins()) candidates.push(strip(ocBase))
     for (const port of PORTS) candidates.push(`http://127.0.0.1:${port}`)
@@ -165,9 +189,12 @@
 
   function baseURL() {
     if (/^https?:/.test(location.origin)) return Promise.resolve(location.origin)
-    const ocCaptured = ocCapturedOrigins()[0]
-    if (ocCaptured) return Promise.resolve(ocCaptured)
-    if (!basePromise) basePromise = probeBase()
+    if (!basePromise) {
+      basePromise = probeBase().then((base) => {
+        if (!base) basePromise = null
+        return base
+      })
+    }
     return basePromise
   }
 
@@ -219,7 +246,46 @@
 
   // ---------- 消息定位 ----------
 
+  /** 新版桌面端路由在内存里，location.pathname 恒为 /index.html，改从窗口的 last-active-url 取会话 id。 */
+  function currentSessionID() {
+    try {
+      const fromPath = (location.pathname || "").match(/\/session\/(ses_[A-Za-z0-9]+)/)
+      if (fromPath) return fromPath[1]
+      const keys = []
+      const windowID = window.electron && window.electron.windowID
+      if (windowID) keys.push(`opencode.desktop.window.${windowID}.last-active-url`)
+      for (let index = 0; index < localStorage.length; index += 1) {
+        const key = localStorage.key(index)
+        if (key && /last-active-url$/.test(key)) keys.push(key)
+      }
+      for (const key of keys) {
+        const raw = localStorage.getItem(key) || ""
+        const match = raw.match(/\/session\/(ses_[A-Za-z0-9]+)/)
+        if (match) return match[1]
+      }
+    } catch {}
+    return ""
+  }
+
   function messageInfo(node) {
+    const sessionID = currentSessionID()
+    // 新版（2.2.x）：文本段带 data-timeline-part-id，值即该段所属消息 id（msg_...）
+    // 容器层则是 data-timeline-part-ids="msg_x:reasoning:0,call_..." 形式。
+    let cursor = node
+    while (cursor && cursor !== document.body) {
+      const raw = cursor.getAttribute
+        ? cursor.getAttribute("data-timeline-part-id") || cursor.getAttribute("data-timeline-part-ids") || ""
+        : ""
+      if (raw) {
+        const ids = raw
+          .split(",")
+          .map((item) => item.split(":")[0].trim())
+          .filter((item) => /^msg_/.test(item))
+        if (ids.length) return { messageID: ids[ids.length - 1], sessionID }
+      }
+      cursor = cursor.parentElement
+    }
+    // 旧版：data-message-id / #message-msg_*
     let el = node
     while (el && el !== document.body) {
       let id = el.getAttribute ? el.getAttribute("data-message-id") || "" : ""
@@ -227,10 +293,7 @@
         if (/^message-msg_/.test(el.id)) id = el.id.slice("message-".length)
         else if (/^msg_/.test(el.id)) id = el.id
       }
-      if (id) {
-        const match = (location.pathname || "").match(/\/session\/(ses_[A-Za-z0-9]+)/)
-        return { messageID: id, sessionID: match ? match[1] : "" }
-      }
+      if (id) return { messageID: id, sessionID }
       el = el.parentElement
     }
     return null
@@ -603,11 +666,41 @@
     return mine
   }
 
+  /**
+   * 新版 2.2.x 的助手文本段结构：
+   *   <div data-component="text-part" data-timeline-part-id="msg_...">
+   *     <div data-slot="text-part-body">…</div>
+   *     <div data-slot="text-part-footer">
+   *       <div data-slot="text-part-copy-wrapper"><button aria-label="复制回复">…</button></div>
+   *     </div>
+   *   </div>
+   * 流式输出中还没有 footer，只有 showCopy 时才会直接挂 copy-wrapper。
+   */
+  function copyButtons() {
+    const out = []
+    const seen = new Set()
+    const selectors = [
+      '[data-slot="text-part-copy-wrapper"] button',
+      `button[aria-label="${TARGET_LABEL}"]`,
+      `button[aria-label="${COPIED_LABEL}"]`,
+    ]
+    for (const selector of selectors) {
+      for (const button of document.querySelectorAll(selector)) {
+        if (seen.has(button)) continue
+        seen.add(button)
+        if (button.getAttribute && button.getAttribute(MARK) === "button") continue
+        if (button.closest && button.closest('[data-slot="user-message-copy-wrapper"]')) continue
+        out.push(button)
+      }
+    }
+    return out
+  }
+
   function apply() {
     try {
       if (!state.enabled) return
       let injected = 0
-      const buttons = document.querySelectorAll(`button[aria-label="${TARGET_LABEL}"]`)
+      const buttons = copyButtons()
       for (const copyBtn of buttons) {
         // 复制按钮包在应用自带的 tooltip-v2-trigger 容器里（悬停会显示"复制回复"气泡）。
         // 修改按钮要插到该容器**外面**，否则会继承原容器的气泡；改为自带气泡。
