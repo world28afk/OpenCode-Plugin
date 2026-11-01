@@ -29,13 +29,22 @@ const traySource = join(root, "desktop", "oc-exit-tray.js")
 const LEGACY_INJECT = "oc-exit-inject.js"
 const MARK_START = "/* oc-exit:tray:start */"
 const MARK_END = "/* oc-exit:tray:end */"
-const defaultApp = join(
+const legacyDefaultApp = join(
   process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local"),
   "Programs",
   "@opencodedesktop",
   "resources",
   "app.asar",
 )
+// 2.x 起安装目录从 @opencodedesktop 改成 ai.opencode.desktop，两处都探一遍
+const defaultApp = (() => {
+  const local = process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local")
+  const candidates = [
+    join(local, "Programs", "ai.opencode.desktop", "resources", "app.asar"),
+    legacyDefaultApp,
+  ]
+  return candidates.find((item) => existsSync(item)) ?? candidates[0]
+})()
 
 const args = process.argv.slice(2)
 const dryRun = args.includes("--dry-run")

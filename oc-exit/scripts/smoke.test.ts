@@ -37,10 +37,19 @@ describe("quit", () => {
 
   test("buildQuitScript targets both desktop and service, desktop first", () => {
     const script = buildQuitScript({ desktop: true, service: true, mcp: false })
-    expect(script).toContain("taskkill /IM OpenCode.exe /T /F")
-    expect(script).toContain("taskkill /IM opencode-cli.exe /T /F")
-    expect(script.indexOf("OpenCode.exe")).toBeLessThan(script.indexOf("opencode-cli.exe"))
+    expect(script).toContain("'OpenCode.exe'")
+    expect(script).toContain("'opencode-cli.exe'")
+    expect(script.indexOf("'OpenCode.exe'")).toBeLessThan(script.indexOf("'opencode-cli.exe'"))
     expect(script).not.toContain("modelcontextprotocol")
+  })
+
+  test("buildQuitScript kills by pid and retries instead of tree-killing itself", () => {
+    const script = buildQuitScript({ desktop: true, service: true, mcp: false })
+    expect(script).toContain("Stop-Process -Id")
+    expect(script).toContain("for ($round = 1;")
+    expect(script).not.toContain("taskkill /IM OpenCode.exe /T")
+    expect(script).not.toContain("taskkill /IM opencode-cli.exe /T")
+    expect(script).toContain("service.json")
   })
 
   test("buildQuitScript can opt out and add mcp sweep", () => {
@@ -49,7 +58,6 @@ describe("quit", () => {
     expect(script).toContain("opencode-cli.exe")
     expect(script).toContain("modelcontextprotocol")
   })
-
   test("focus script uses Win32 activation", () => {
     expect(buildFocusScript()).toContain("SetForegroundWindow")
   })

@@ -36,4 +36,4 @@ node scripts/patch-desktop.mjs --restore   # 还原备份
 
 - 主进程是 ESM，注入片段用动态 `import("electron")`，不依赖打包后的压缩变量名。
 - 托盘图标取 asar 内 `resources/icons/icon.ico`（回退 `out/renderer/favicon.ico`），统一缩放到 16×16。
-- 退出用独立 `powershell -Command "taskkill /IM opencode-cli.exe /T /F …"`（`detached + unref`），确保后台服务与 MCP 子进程一并结束。
+- 退出用独立 `.ps1`（`detached + unref`）：先关桌面端、再关 `opencode-cli.exe`，按 PID 精确终止 + 轮询复查（20 轮）直到两类进程归零；**刻意不用 `taskkill /T`**——终止脚本自身就在被终止的树里，`/T` 会把它一起杀掉导致后续清理丢失。日志写到 `%TEMP%\oc-exit-quit.log`。

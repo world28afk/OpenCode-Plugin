@@ -54,10 +54,20 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/apply-desktop.ps1
 
 树中的角标：`oc-exit-tray.js`；卸载：`--unpatch`。
 
+### 3. 立刻彻底关闭（不需要注入、不需要重启）
+
+不想打补丁时，可直接用独立脚本一次性收掉桌面端 + 后台 sidecar：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\quit-opencode.ps1 -DryRun   # 先看会杀哪些进程
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\quit-opencode.ps1           # 立即彻底关闭
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\quit-opencode.ps1 -WithMcp  # 连 MCP 子进程一起收
+```
+
 ## 行为与边界
 
 - 关闭主窗口 → **收进托盘**（主进程与托盘保持存活），从托盘再「显示」或「退出」。
-- 「退出 OpenCode」通过**独立延迟脚本**结束 `opencode-cli.exe`（`/T` 含子进程）后退出界面，避免界面重启守护进程。
+- 「退出 OpenCode」通过**独立延迟脚本**先关桌面端、再关 `opencode-cli.exe`，按 PID 精确终止并轮询复查，直到两类进程都不存在（不使用 `taskkill /T`，避免脚本自杀与漏杀）。
 - 托盘图标取自 asar 内 `resources/icons/icon.ico`；主进程为 ESM，注入片段用动态 `import()`，不依赖压缩变量名。
 - 仅 Windows 托盘（`Tray`）；桌面端自动更新会覆盖 `app.asar`，升级后重新执行注入。
 
