@@ -68,6 +68,26 @@
     return Array.from(new Set(found))
   }
 
+  /**
+   * 新版桌面端 sidecar 端口动态分配，固定端口表会失效。
+   * 渲染进程自己在请求这个端口（/api/config 等），直接读 Resource Timing 的 origin 最准。
+   */
+  function ocPerfOrigins() {
+    const apiHits = []
+    const others = []
+    try {
+      for (const entry of performance.getEntriesByType("resource")) {
+        const url = entry && entry.name
+        if (!url || !/^https?:\/\//i.test(url)) continue
+        const match = url.match(/^(https?:\/\/[^/?#]+)/i)
+        if (!match) continue
+        if (url.indexOf("/api/") !== -1) apiHits.push(match[1])
+        else others.push(match[1])
+      }
+    } catch {}
+    return Array.from(new Set([...apiHits, ...others]))
+  }
+
   const REFRESH_MS = 15_000
 
   const state = { entries: [], error: null, loadedAt: 0, busy: false }
@@ -92,6 +112,7 @@
     } catch {}
     const boot = window.electron && window.electron.bootstrap
     if (boot && typeof boot === "object" && typeof boot.defaultServerUrl === "string") candidates.push(strip(boot.defaultServerUrl))
+    for (const ocBase of ocPerfOrigins()) candidates.push(strip(ocBase))
     for (const ocBase of ocCapturedOrigins()) candidates.push(strip(ocBase))
     for (const ocBase of ocStorageOrigins()) candidates.push(strip(ocBase))
     for (const port of PORTS) candidates.push(`http://127.0.0.1:${port}`)
@@ -120,8 +141,6 @@
     if (!basePromise) {
       basePromise = (async () => {
         if (/^https?:/.test(location.origin)) return location.origin
-        const ocCaptured = ocCapturedOrigins()[0]
-        if (ocCaptured) return ocCaptured
         const base = await probeBase()
         if (!base) basePromise = null
         return base
