@@ -23,13 +23,12 @@ import { fileURLToPath } from "node:url"
 const root = join(dirname(fileURLToPath(import.meta.url)), "..")
 const injectSource = join(root, "desktop", "oc-purge-dock.js")
 const injectName = "oc-purge-dock.js"
-const defaultApp = join(
-  process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local"),
-  "Programs",
-  "@opencodedesktop",
-  "resources",
-  "app.asar",
-)
+const localAppData = process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local")
+// 新版桌面版目录为 ai.opencode.desktop，旧版为 @opencodedesktop：按存在性优先
+const defaultApp = [
+  join(localAppData, "Programs", "ai.opencode.desktop", "resources", "app.asar"),
+  join(localAppData, "Programs", "@opencodedesktop", "resources", "app.asar"),
+].find((candidate) => existsSync(candidate)) ?? join(localAppData, "Programs", "ai.opencode.desktop", "resources", "app.asar")
 
 const args = process.argv.slice(2)
 const dryRun = args.includes("--dry-run")

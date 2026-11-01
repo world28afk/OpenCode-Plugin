@@ -4,7 +4,10 @@ $ErrorActionPreference = "Stop"
 $log = Join-Path $env:TEMP "oc-purge-desktop.log"
 function Log($m) { "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $m" | Add-Content -Path $log -Encoding UTF8 }
 
-$appDir = "C:\Users\Administrator\AppData\Local\Programs\@opencodedesktop"
+$appDir = @(
+  (Join-Path $env:LOCALAPPDATA "Programs\ai.opencode.desktop"),
+  (Join-Path $env:LOCALAPPDATA "Programs\@opencodedesktop")
+) | Where-Object { Test-Path (Join-Path $_ "OpenCode.exe") } | Select-Object -First 1
 $exe = Join-Path $appDir "OpenCode.exe"
 $repo = "D:\OpenCode-Plugin\oc-purge"
 

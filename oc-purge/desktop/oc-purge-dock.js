@@ -100,9 +100,107 @@
       return nativeOpen.apply(this, arguments)
     }
   } catch {}
+  try {
+    const NativeEventSource = window.EventSource
+    if (typeof NativeEventSource === "function") {
+      const patched = function (url, config) {
+        recordUrl(url)
+        return new NativeEventSource(url, config)
+      }
+      patched.prototype = NativeEventSource.prototype
+      window.EventSource = patched
+    }
+  } catch {}
 
   const stripBase = (v) => String(v || "").replace(/\/+$/, "")
   let basePromise = null
+
+  /**
+   * 新版桌面端 sidecar 端口动态分配（当前 28894），固定端口表和 localStorage 里的旧地址都会失效。
+   * 渲染进程自己就在请求这个端口，直接读 Resource Timing 里真实出现过的 origin 最准。
+   */
+  function perfOrigins() {
+    const apiHits = []
+    const others = []
+    try {
+      for (const entry of performance.getEntriesByType("resource")) {
+        const url = entry && entry.name
+        if (!url || !/^https?:\/\//i.test(url)) continue
+        const match = url.match(/^(https?:\/\/[^/?#]+)/i)
+        if (!match) continue
+        if (url.indexOf("/api/") !== -1) apiHits.push(match[1])
+        else others.push(match[1])
+      }
+    } catch {}
+    return [...new Set([...apiHits, ...others])]
+  }
+
+  function storageOrigins() {
+    const found = []
+    try {
+      for (let index = 0; index < localStorage.length; index += 1) {
+        const key = localStorage.key(index)
+        const raw = key === null ? null : localStorage.getItem(key)
+        if (!raw || raw.length > 50000) continue
+        const matches = raw.match(/https?:\/\/[A-Za-z0-9_.\-]+(?::\d+)?/g)
+        if (matches) for (const item of matches) found.push(item)
+      }
+    } catch {}
+    return found
+  }
+
+  async function snapshotOrigins() {
+    const found = []
+    try {
+      const snapshot = await window.electron?.storageSnapshot
+      if (snapshot) {
+        const matches = JSON.stringify(snapshot).match(/https?:\/\/[A-Za-z0-9_.\-]+(?::\d+)?/g)
+        if (matches) for (const item of matches) found.push(item)
+      }
+    } catch {}
+    return found
+  }
+
+  async function attemptBase(base) {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 1200)
+    try {
+      const response = await fetch(`${base}/api/info`, { cache: "no-store", signal: controller.signal })
+      return response.ok || response.status === 401 || response.status === 403 ? base : null
+    } catch {
+      return null
+    } finally {
+      clearTimeout(timeout)
+    }
+  }
+
+  /** 新版桌面端 sidecar 端口动态分配，固定端口表失效：最后兜底扫本机端口。 */
+  async function scanLocalPorts(budgetMs) {
+    const found = []
+    const started = Date.now()
+    let port = 1024
+    const CONCURRENCY = 192
+    const worker = async () => {
+      for (;;) {
+        if (Date.now() - started > budgetMs) return
+        const current = port
+        port += 1
+        if (current > 65535) return
+        try {
+          const controller = new AbortController()
+          const timer = setTimeout(() => controller.abort(), 700)
+          const response = await fetch(`http://127.0.0.1:${current}/api/info`, { cache: "no-store", signal: controller.signal })
+          clearTimeout(timer)
+          if (response.ok || response.status === 401 || response.status === 403) {
+            const text = await response.text().catch(() => "")
+            if (!text || /"version"|"pid"|"urls"|Unauthorized/i.test(text)) found.push(`http://127.0.0.1:${current}`)
+          }
+        } catch {}
+      }
+    }
+    await Promise.all(Array.from({ length: CONCURRENCY }, worker))
+    return found
+  }
 
   async function probeBase() {
     const candidates = []
@@ -110,22 +208,23 @@
       const own = localStorage.getItem(LS_BASE)
       if (own) candidates.push(stripBase(own))
     } catch {}
+    for (const origin of perfOrigins()) candidates.push(stripBase(origin))
     for (const origin of captured) candidates.push(stripBase(origin))
+    for (const origin of storageOrigins()) candidates.push(stripBase(origin))
+    for (const origin of await snapshotOrigins()) candidates.push(stripBase(origin))
     for (const port of [49374, 4096, 49375, 49376, 49377, 3001]) candidates.push(`http://127.0.0.1:${port}`)
-    const attempt = async (base) => {
-      const controller = new AbortController()
-      const timeout = setTimeout(() => controller.abort(), 1200)
-      try {
-        const response = await fetch(`${base}/api/info`, { cache: "no-store", signal: controller.signal })
-        return response.ok || response.status === 401 || response.status === 403 ? base : null
-      } catch {
-        return null
-      } finally {
-        clearTimeout(timeout)
-      }
-    }
     const unique = [...new Set(candidates.filter(Boolean))]
-    const hit = (await Promise.all(unique.map(attempt))).find(Boolean)
+    let hit = (await Promise.all(unique.map(attemptBase))).find(Boolean) || null
+    if (!hit) {
+      // 冷启动时渲染进程的 /api 请求可能还没发出，稍等再读一次 Resource Timing
+      await new Promise((resolve) => setTimeout(resolve, 1200))
+      const late = perfOrigins().map(stripBase).filter((item) => !unique.includes(item))
+      if (late.length) hit = (await Promise.all(late.map(attemptBase))).find(Boolean) || null
+    }
+    if (!hit) {
+      const scanned = await scanLocalPorts(12000)
+      hit = scanned.find(Boolean) || null
+    }
     if (hit) {
       try {
         localStorage.setItem(LS_BASE, hit)
@@ -139,8 +238,6 @@
     if (!basePromise) {
       basePromise = (async () => {
         if (/^https?:/.test(location.origin)) return location.origin
-        const cap = [...captured][0]
-        if (cap) return cap
         if (location.protocol !== "oc:") return null
         const base = await probeBase()
         if (!base) basePromise = null
@@ -187,6 +284,7 @@
       state.profile = null
       state.phase = "stopped"
       state.error = error instanceof Error ? error.message : String(error)
+      basePromise = null
     }
     syncEditor()
     renderNow()
@@ -708,6 +806,7 @@
   let bodyNode = null
   let statusNode = null
   let toastNode = null
+  let tabsNode = null
   let signature = ""
   let pendingRender = false
 
@@ -771,11 +870,14 @@
     root.append(head)
 
     const tabs = el("div", "ocp-tabs")
+    tabsNode = tabs
     for (const [id, label] of [["clean", "Clean"], ["drill", "Drill"]]) {
       const t = el("button", `ocp-tab ${state.tab === id ? "on" : ""}`, label)
       t.type = "button"
+      t.dataset.tab = id
       t.addEventListener("click", () => {
         state.tab = id
+        syncTabs()
         signature = ""
         renderNow()
       })
@@ -803,6 +905,13 @@
       }, 0)
     })
     return root
+  }
+
+  function syncTabs() {
+    if (!tabsNode) return
+    for (const node of tabsNode.children) {
+      node.classList.toggle("on", node.dataset && node.dataset.tab === state.tab)
+    }
   }
 
   function paintStatus() {
@@ -866,6 +975,7 @@
 
   function renderNow() {
     if (!panel || !state.open) return
+    syncTabs()
     paintStatus()
     const active = document.activeElement
     if (active && panel.contains(active) && /INPUT|TEXTAREA|SELECT/.test(active.tagName)) {
@@ -890,6 +1000,7 @@
         panel.remove()
         panel = null
         bodyNode = statusNode = toastNode = null
+        tabsNode = null
         signature = ""
       }
       return
