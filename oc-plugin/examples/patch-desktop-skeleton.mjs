@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // app.asar 补丁器骨架（以「注入 desktop 脚本」为例）。
 // 完整实现（--dry-run / --force / --app / --unpatch / --restore）见:
-//   https://github.com/world28afk/oc-infinite-gen-4/blob/main/scripts/patch-desktop.mjs
+//   （原 oc-infinite-gen-4 仓库已删除；本文件即该脚本的通用骨架）
 //
 // 关键步骤:
 //   1. 默认目标 %LOCALAPPDATA%\Programs\@opencodedesktop\resources\app.asar

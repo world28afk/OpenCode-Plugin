@@ -9,7 +9,6 @@
 
 完整可运行实现请参考：
 
-- [world28afk/oc-infinite-gen-4](https://github.com/world28afk/oc-infinite-gen-4) — 服务端（hook/tool/rpc）+ TUI + 桌面徽章 + 完整补丁器（`--dry-run/--unpatch/--restore`）与自动应用脚本
 - [world28afk/oc-deepseek-banlance](https://github.com/world28afk/oc-deepseek-banlance) — 服务端工具/RPC/缓存 + TUI 面板 + 桌面上下文提示与审查页注入
 
 > 使用前请把示例里的 `acme` 前缀替换为你的插件名。

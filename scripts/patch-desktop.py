@@ -21,7 +21,6 @@
 # 适用插件:
 #   renderer 注入: oc-cyberbot / oc-deepseek-banlance / oc-plugin-manager / oc-purge
 #   main   注入: oc-exit（Windows 系统托盘, 注入 out/main/index.js）
-#   oc-infinite-gen-4 已停用（见 DISABLED_PLUGINS, 不再注入）。
 #
 # 用法:
 #   python3 scripts/patch-desktop.py                     # 注入全部（自动备份, 原子替换）
@@ -65,8 +64,8 @@ MAIN_INJECT_SUFFIX = "-tray.js"              # 主进程注入（oc-exit 系统�
 BLOCK_SIZE = 4194304  # 与 @electron/asar 的 integrity 分块一致（4 MiB）
 
 # 已停用/除名的插件：源码保留，但不再注入桌面端（防止全量重打把旧 UI 又注回去）。
-# oc-infinite-gen-4 已从 OpenCode 移除（badge UI 亦已从 app.asar 清理）。
-DISABLED_PLUGINS = {"oc-infinite-gen-4"}
+# 当前为空；留此开关便于以后临时停用某个插件。
+DISABLED_PLUGINS = set()
 
 # 主进程注入清单：文件名 → 标记与目标文件。
 # 标记必须与各插件自带 patch-desktop.mjs 完全一致，两边才能互相 --unpatch。

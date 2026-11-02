@@ -4,7 +4,7 @@
 //   SSE 事件: rpc.deepseek.balance.v1.updated
 //
 // 注意: Rpc.define 只是 identity 辅助, 这里用纯对象定义以保持运行时零外部依赖
-// (与 oc-infinite-gen-4 的自包含策略一致)。
+// (自包含策略: 不 import 任何非运行时提供的包)。
 
 export const RPC_ID = "deepseek.balance.v1"
 

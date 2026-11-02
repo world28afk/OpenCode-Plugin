@@ -11,9 +11,8 @@ $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $target = Join-Path $env:USERPROFILE ".config\opencode\plugins"
 New-Item -ItemType Directory -Force -Path $target | Out-Null
 
-# 已停用/除名：源码保留，但不再安装到 opencode 插件目录。
-# oc-infinite-gen-4 已从 OpenCode 移除（同时其桌面 badge 已从 app.asar 清理）。
-$skip = @("oc-infinite-gen-4")
+# 已停用/除名：源码保留，但不再安装到 opencode 插件目录（当前为空）。
+$skip = @()
 
 $count = 0
 foreach ($repo in Get-ChildItem $root -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -like "oc-*" }) {

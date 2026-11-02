@@ -2,7 +2,7 @@
 
 > 适用对象：DeepSeek Harness（DSH，Cordis 架构）插件 → OpenCode V2 插件。
 > 本文基于两个真实移植项目：
-> - [`world28afk/oc-infinite-gen-4`](https://github.com/world28afk/oc-infinite-gen-4)（上游 `Minglink/dsh-infinite-gen-4`）
+> - `oc-infinite-gen-4`（仓库已删除）（上游 `Minglink/dsh-infinite-gen-4`）
 > - [`world28afk/oc-deepseek-banlance`](https://github.com/world28afk/oc-deepseek-banlance)
 >
 > 开发 API 细节见 [opencode-plugin-development.md](opencode-plugin-development.md)。

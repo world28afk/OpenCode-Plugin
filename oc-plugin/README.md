@@ -29,7 +29,6 @@
 
 | 仓库 | 说明 |
 | :--- | :--- |
-| [world28afk/oc-infinite-gen-4](https://github.com/world28afk/oc-infinite-gen-4) | 案例：DSH 插件移植 + 桌面端输入框运行徽章 |
 | [world28afk/oc-deepseek-banlance](https://github.com/world28afk/oc-deepseek-banlance) | 案例：服务端工具/RPC + TUI + 桌面端上下文提示与审查页注入 |
 | [Minglink/dsh-infinite-gen-4](https://github.com/Minglink/dsh-infinite-gen-4) | 上游 DSH 插件示例（CC BY-NC-SA 4.0） |
 

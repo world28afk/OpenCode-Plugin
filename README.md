@@ -8,12 +8,10 @@
 
 | 目录 | 说明 | 类型 |
 | :--- | :--- | :--- |
-| `oc-infinite-gen-4` | ~~无限四代内核移植 + 桌面徽章~~（**已停用并从 OpenCode 移除**；源码保留，桌面 badge 已从 app.asar 清理） | 服务端 + 桌面注入 |
 | `oc-purge` | dsh-purge 破甲移植（逐模型可换提示词 + 规则库 + 内置红队技能 + 桌面 dock） | 服务端 + 桌面注入 |
 | `oc-deepseek-banlance` | DeepSeek 余额（上下文圈 + 审查页） | 服务端 + 桌面注入 |
 | `oc-plugin-manager` | 插件管理器（设置页原生开关启用/禁用） | 服务端 + 桌面注入 |
 | `oc-exit` | 彻底退出（Windows 系统托盘图标 + 右键「显示 / 退出」；关闭主窗口收进托盘，退出时结束后台进程） | 服务端 + 主进程注入 |
-| `oc-bark` | 任务完成 Bark 推送（记录你发的任务原文与历时，推送到 iPhone；桌面自带提示音保持原样） | 服务端 |
 | `oc-plugin` | OpenCode 插件开发与迁移文档 | 文档 |
 
 ## 常用操作
@@ -27,7 +25,6 @@ node .\oc-plugin-manager\scripts\patch-desktop.mjs          # 插件管理器开
 node .\oc-exit\scripts\patch-desktop.mjs                    # 系统托盘 + 关闭收进托盘 + 彻底退出（主进程注入）
 node .\oc-purge\scripts\patch-desktop.mjs                   # 破甲 dock（输入框上方按钮 + 右侧面板）
 node .\oc-deepseek-banlance\scripts\patch-desktop.mjs       # 余额注入（如有）
-# 注: oc-infinite-gen-4 已停用, 不再注入桌面端（见根 scripts/patch-desktop.py 的 DISABLED_PLUGINS）
 # 或使用各自的 scripts\apply-desktop.ps1（自动关闭→打补丁→重启）
 
 # 3) 回归校验（各仓库根目录）
@@ -59,8 +56,7 @@ python3 scripts/patch-desktop.py --restore                # 从备份还原
 - macOS 若重开后被系统报「已损坏」：`xattr -dr com.apple.quarantine /Applications/OpenCode.app`。
 - 适用范围：renderer 注入插件（`oc-cyberbot` / `oc-deepseek-banlance` / `oc-plugin-manager` / `oc-purge`）
   + 主进程注入插件（`oc-exit` 的 `desktop/oc-exit-tray.js` → `out/main/index.js`，
-  用 `/* oc-exit:tray:start */ … /* oc-exit:tray:end */` 标记）；
-  `oc-infinite-gen-4` 已停用不再注入。
+  用 `/* oc-exit:tray:start */ … /* oc-exit:tray:end */` 标记）。
 
 ## 约定
 

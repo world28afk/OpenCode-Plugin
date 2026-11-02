@@ -23,7 +23,7 @@
   const RPC_ID = "cyberbot.message"
   const MARK = "data-oc-cyberbot"
   const LS_BASE = "oc-cyberbot:serverBase"
-  const SHARED_BASE_KEYS = ["oc-plugin-manager:serverBase", "oc-deepseek-banlance:serverBase", "oc-infinite-gen-4:serverBase"]
+  const SHARED_BASE_KEYS = ["oc-plugin-manager:serverBase", "oc-deepseek-banlance:serverBase"]
   const PORTS = [49374, 4096, 49375, 49376, 49377, 3001]
 
   // ---- [oc-inject-fix] 服务源捕获: 直接复用应用自身 /api 请求的 origin, 不依赖端口探测 ----

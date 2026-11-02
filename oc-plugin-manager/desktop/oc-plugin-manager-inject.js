@@ -20,7 +20,7 @@
   const RPC_ID = "plugin.manager"
   const MARK = "data-oc-plugin-manager"
   const LS_BASE = "oc-plugin-manager:serverBase"
-  const SHARED_BASE_KEYS = ["oc-deepseek-banlance:serverBase", "oc-deepseek-balance:serverBase", "oc-infinite-gen-4:serverBase"]
+  const SHARED_BASE_KEYS = ["oc-deepseek-banlance:serverBase", "oc-deepseek-balance:serverBase"]
   const PORTS = [49374, 4096, 49375, 49376, 49377, 3001]
 
   // ---- [oc-inject-fix] 服务源捕获: 直接复用应用自身 /api 请求的 origin, 不依赖端口探测 ----
