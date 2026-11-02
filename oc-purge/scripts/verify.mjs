@@ -182,6 +182,13 @@ if (!runningUnderBun) {
   check("netScope.entryHost: 网段丢弃", netScope.entryHost("10.0.0.0/8") === "")
   check("netScope.entryHost: 通配符丢弃", netScope.entryHost("*.evil.com") === "")
   check("netScope.entryHost: 私钥丢弃", netScope.entryHost("-----BEGIN OPENSSH PRIVATE KEY-----") === "")
+  check("netScope.entryHost: 链路本地 v4 丢弃", netScope.entryHost("169.254.169.254") === "")
+  check("netScope.entryHost: 链路本地 v6 丢弃", netScope.entryHost("fe80::1") === "")
+  check("netScope.entryHost: IPv4-mapped 归一", netScope.entryHost("::ffff:192.168.1.10") === "192.168.1.10")
+  check("netScope.entryHost: IPv4-mapped 十六进制归一", netScope.entryHost("::ffff:c0a8:10a") === "192.168.1.10")
+  check("netScope.entryHost: 映射元数据丢弃", netScope.entryHost("::ffff:169.254.169.254") === "")
+  const mapped = netScope.normalizeAllowText("10.0.0.5\n::ffff:10.0.0.5\n169.254.169.254\n")
+  check("netScope.normalizeAllowText: 映射地址与 v4 去重", mapped.hosts.length === 1 && mapped.dropped === 1)
   const allow = netScope.normalizeAllowText("203.0.113.10\n10.0.0.0/8\nmy-vps.example.com\n")
   check("netScope.normalizeAllowText: dropped=1 且仅保留合法主机", allow.dropped === 1 && allow.hosts.length === 2)
 

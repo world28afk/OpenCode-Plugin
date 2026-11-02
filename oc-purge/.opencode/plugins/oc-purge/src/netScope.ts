@@ -12,6 +12,38 @@ const FILE_SUFFIX = new Set([
 const HOST_NAME = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/
 const V4_TEXT = /^(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)$/
 
+// ── 链路本地 / IPv4-mapped 归一（对齐上游 1.1.74「堵身份漏洞」的解析层，
+//    只作用于白名单规范化，不引入任何目标门禁）─────────────────────────────
+/** 169.254.0.0/16：链路本地，含云元数据 169.254.169.254。 */
+const V4_LINK_LOCAL = /^169\.254\./
+/** IPv4-mapped IPv6：::ffff:1.2.3.4 / 0:0:0:0:0:ffff:1.2.3.4 / ::ffff:0102:0304 */
+const V6_MAPPED = /^(?:::|(?:0{1,4}:){5})ffff:(.+)$/i
+
+function isLinkLocalV4(host: string): boolean {
+  return V4_LINK_LOCAL.test(host)
+}
+
+/** fe80::/10：IPv6 链路本地。压缩写法只取第一组。 */
+function isLinkLocalV6(host: string): boolean {
+  const first = host.toLowerCase().split(":")[0]
+  return /^fe[89ab][0-9a-f]$/.test(first)
+}
+
+/** 把 IPv4-mapped IPv6 拆回裸 v4；不是映射地址则原样返回。 */
+function unwrapMappedV4(host: string): string {
+  const text = host.toLowerCase()
+  const matched = text.match(V6_MAPPED)
+  if (!matched) return host
+  const tail = matched[1]
+  if (V4_TEXT.test(tail)) return tail
+  const hex = tail.match(/^([0-9a-f]{1,4}):([0-9a-f]{1,4})$/)
+  if (!hex) return host
+  const hi = parseInt(hex[1], 16)
+  const lo = parseInt(hex[2], 16)
+  return `${hi >> 8}.${hi & 0xff}.${lo >> 8}.${lo & 0xff}`
+}
+
+
 function parseIpv6(input: string): string | null {
   const text = String(input || "").trim().toLowerCase()
   if (!text.includes(":")) return null
@@ -52,8 +84,16 @@ export function entryHost(raw: string): string {
   }
   const host = hostOf(body)
   if (!host || host.length > 253) return ""
-  if (V4_TEXT.test(host)) return host
-  if (host.includes(":")) return parseIpv6(host) != null ? host : ""
+  if (V4_TEXT.test(host)) return isLinkLocalV4(host) ? "" : host
+  if (host.includes(":")) {
+    // 映射地址按裸 v4 归一，与 v4 条目共用去重与链路本地判定
+    const mapped = unwrapMappedV4(host)
+    if (mapped !== host) return V4_TEXT.test(mapped) && !isLinkLocalV4(mapped) ? mapped : ""
+    const v6 = parseIpv6(host)
+    if (v6 == null) return ""
+    if (isLinkLocalV6(v6)) return ""
+    return v6
+  }
   if (!HOST_NAME.test(host)) return ""
   const tail = host.slice(host.lastIndexOf(".") + 1)
   if (FILE_SUFFIX.has(tail)) return ""

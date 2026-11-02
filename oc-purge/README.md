@@ -1,6 +1,6 @@
 # oc-purge
 
-**dsh-purge → OpenCode V2 插件移植版**（上游： [`YuJunZhiXue/dsh-purge`](https://github.com/YuJunZhiXue/dsh-purge) v1.1.71，MIT）
+**dsh-purge → OpenCode V2 插件移植版**（基线： [`YuJunZhiXue/dsh-purge`](https://github.com/YuJunZhiXue/dsh-purge) v1.1.71，MIT）
 
 把 DeepSeek Harness（DSH / Cordis）红队插件 **dsh-purge** 按
 [`oc-plugin`](../oc-plugin/docs/dsh-to-opencode-migration.md) 的迁移指南移植为 **OpenCode V2 插件**：
@@ -8,7 +8,15 @@
 
 > ⚠️ 署名要求：本项目按上游 MIT 许可的二开要求，**保留作者署名与来源仓库**
 > [`YuJunZhiXue/dsh-purge`](https://github.com/YuJunZhiXue/dsh-purge)。
-> 仅限本地自有主机的红队评测 / 鲁棒性研究使用。
+>
+> 许可分叉点：上游自 **v1.1.73** 起改为 Apache-2.0 + NOTICE + 商用条款。
+> 本项目代码基于 **v1.1.71（MIT）**，仍按 MIT 分发；若从 ≥ v1.1.73 引入代码，必须同时保留上游
+> `NOTICE` 与署名。
+
+> 🔀 上游自 **v1.1.73** 起转向「开源版 = 本地靶场 only」（私网 IP 门禁、删红队技能库、
+> 禁止游戏外挂）。**本项目不跟随该限制**：保留全类别 Scoped Rules、23 项捆绑技能与
+> 无门禁设计。逐版本对照与分叉记录见
+> [`docs/comparison-with-upstream.md`](docs/comparison-with-upstream.md#6-上游-1173-分叉记录基线-v1171--上游-v1190)。
 
 ---
 

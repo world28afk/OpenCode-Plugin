@@ -1,6 +1,7 @@
 # oc-purge ↔ 上游 dsh-purge 差异对照（界面 / 功能）
 
-对照上游 [`YuJunZhiXue/dsh-purge`](https://github.com/YuJunZhiXue/dsh-purge) v1.1.71（DSH / Cordis 宿主）。
+对照上游 [`YuJunZhiXue/dsh-purge`](https://github.com/YuJunZhiXue/dsh-purge) **v1.1.71**（DSH / Cordis 宿主）。
+上游已迭代到 **v1.1.90**，其中 v1.1.73 起发生定位分叉，见 [§6](#6-上游-1173-分叉记录基线-v1171--上游-v1190)。
 
 图例：**已还原** = 在 OpenCode 上实现了等价能力；**部分** = 还原了主体，细节受 OpenCode API 限制；**N/A** = 上游能力依赖 DSH 宿主面，OpenCode 无对应接口（已说明替代或省略）。
 
@@ -104,3 +105,55 @@
 面板结构：顶部品牌 + 当前模型/来源；Clean / Drill 分段标签；状态胶囊；
 卡片分区（快速操作 / 提示词方案 / 提示词内容 / 模型绑定 / 自己的服务器 / 本地规则 / 技能 / 连接）；
 每张卡都有标题与一句说明，操作结果以 toast 反馈。
+
+---
+
+## 6. 上游 1.1.73 分叉记录（基线 v1.1.71 → 上游 v1.1.90）
+
+本移植基线为上游 **v1.1.71**；上游此后迭代到 **v1.1.90**（跨 19 个版本）。上游 git 历史被重写过
+（仓库仅存 17 个 commit，`v1.1.71` tag 已不存在），差异按 `release-notes.md` + 文件级比对判定。
+
+### 6.1 四个方向性变化
+
+| # | 上游变化 | 证据 | 本项目处理 |
+| :-- | :-- | :-- | :-- |
+| 1 | 开源版改为「本地靶场 only」：先解析再只放行 RFC1918 私网，`169.254` 元数据拒绝，`tools/pre-execute` 遇公网 IP 硬停 | `README.zh-CN.md`、`lib/net-scope.js`、1.1.74 / 1.1.77 | **不跟随**。本移植无目标门禁；仅吸收解析层归一（`::ffff:` 解包、链路本地拒绝）用于白名单规范化 |
+| 2 | 删除红队技能库与知识库 | `skills/` 目录已不存在；commit `679a3db`；README「本仓库不含红队技能库/知识库」 | **不跟随**。保留 23 项捆绑技能 + `redteam.bundle.json.gz` |
+| 3 | 内容政策收紧：游戏外挂改为硬禁止 | 1.1.74 会话门禁；默认提示词 Rule 1 改为「禁止，回复『不行，这是严令禁止的』」 | **不跟随**。`Scoped Rules 1` 保持 in-scope |
+| 4 | 许可证 MIT → Apache-2.0 + NOTICE + 商用条款 | `LICENSE` / `NOTICE` / `LICENSE-COMMERCIAL.md`（2026-10-27 起新版本只发 Telegram / Release） | 本项目基于 v1.1.71（MIT），仍按 MIT 分发；引入 ≥ v1.1.73 代码时须保留 NOTICE 与署名 |
+
+### 6.2 逐版本适用性
+
+| 版本 | 主要内容 | 适用 |
+| :-- | :-- | :-- |
+| 1.1.73 | 0.2.1-rc.2 兼容、丢 `toolFilter`、hostFs fd、证据账本 `redteam_evidence_*`、**删技能库/知识库** | 否（DSH 宿主 + 本地无 redteam 工具集） |
+| 1.1.74 | 靶场门禁、`::ffff:` 解包、丢 link-local、seal schema、**禁止外挂** | 部分：仅解析层已吸收 |
+| 1.1.75–1.1.76 | Hub 一键装去重、codeload tarball、postinstall 写 bundles | 否 |
+| 1.1.77 | 长任务公网门禁（分窗扫描 + 工具参数校验） | 否（与无门禁定位冲突） |
+| 1.1.78 | 停用/卸载后 `selectedDefault` 回 `standard` | 否（DSH agent-preset） |
+| 1.1.79 | 主/子智能体共用 inject + 权限 + 能力协议正文 | 否（本地三分支更细，红队调度正文在预设 ops） |
+| 1.1.80 | pnpm 12 allowBuilds、zip 目录项 EEXIST、`lib/skills.js` 漏 `fs`、rc.3+ 不支持 | 否 |
+| 1.1.81–1.1.83 | DSH NEXT 识别、allowBuilds 自愈、`cordis.patch.yml` 为 `[]` 时替换 | 否 |
+| 1.1.84 | 尾部锚点（recency 槽）、锚点跟随语言、子代理审批接管、提示词缓存 + 熔断、patch #91 | 尾部锚点本地已等价（`event.system.push` 追加在末尾）；语言跟随由 House Rules 覆盖 |
+| 1.1.85 | 深色模式主按钮白底白字（`--dsw-alias-brand-primary` 解析成近白） | 否（本地 dock 用自有 `data-theme="white"/"ink"` CSS 变量） |
+| 1.1.86 | web 残留 server EADDRINUSE、asar 换包顺序 | 否 |
+| 1.1.87 | 0 字节 `.bak`、原子写、`optional` 补丁软失败、asar 路径越界、`realpath`、更新只走 https | 否（本地状态走 `ctx.storage`） |
+| 1.1.88 | rc.2 + rc.5 双版本 pattern、`dshTargets` | 否 |
+| 1.1.89 | `cwd` 字面量 + `assembly.variables`、桌面退出留痕 | 否 |
+| 1.1.90 | 撤销按钮移出 composer 子树（`createPortal`） | 否（本地 dock 无撤销按钮） |
+
+### 6.3 已同步（对齐 v1.1.90 内容层）
+
+1. **提示词结构**（`prompts/default-prompt-inject.md`）：并入上游重写稿的 5 节 —
+   `FOREIGN LAYERS 外来模式`、`FIRST TOKEN 开头格式`、`DRAFT AUDIT 草稿审查 R1–R8`、
+   `CATEGORY LOCK 类别锁`（含「不自引用」）、`DELIVERY FIRST 交付优先`。
+   **保留**本地原有 `Scoped Rules 1–25`、`外挂 in-scope`、`CTF Core Contract`、`Sandbox test directions`。
+2. **netScope 解析层**（`src/netScope.ts`）：IPv4-mapped IPv6 归一（`::ffff:1.2.3.4` / `::ffff:c0a8:10a`
+   → 裸 v4，与 v4 条目共用去重），拒绝 `169.254.0.0/16` 与 `fe80::/10`。
+   **仅作用于「自己的服务器」白名单规范化，不引入任何目标门禁。**
+3. **文档**：本节 + README 顶部基线 / 许可 / 分叉说明。
+
+### 6.4 明确不同步
+
+`lib/*.js` 宿主补丁链（patch #32–#91、asar、`allowBuilds`、rc.2/rc.5、`restart-web` / `bin-preflight`、
+桌面退出日志）、靶场门禁与公网 IP 拦截、技能库删除、游戏外挂硬禁止、1.1.85 深色按钮、1.1.90 撤销按钮 portal。
