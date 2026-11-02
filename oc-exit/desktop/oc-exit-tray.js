@@ -53,6 +53,21 @@
       // ignore
     }
 
+    // 正常退出路径 (应用菜单退出 / 系统关机 / app.quit) 必须先放行,
+    // 否则 close 钩子会把窗口藏起来, 应用永远退不掉。
+    app.on("before-quit", () => {
+      quitting = true
+    })
+    // 窗口被销毁时不跟随默认行为退出: 托盘要常驻
+    app.on("window-all-closed", (event) => {
+      if (quitting) return
+      try {
+        event.preventDefault()
+      } catch {
+        // ignore
+      }
+    })
+
     const showWindow = () => {
       try {
         const wins = BrowserWindow.getAllWindows().filter((win) => !win.isDestroyed())
@@ -166,18 +181,32 @@
         const appPath = app.getAppPath()
         candidates.push(pathMod.join(appPath, "resources", "icons", "icon.ico"))
         candidates.push(pathMod.join(appPath, "out", "renderer", "favicon.ico"))
+        candidates.push(pathMod.join(appPath, "out", "renderer", "favicon-v3.ico"))
+        candidates.push(pathMod.join(appPath, "out", "renderer", "web-app-manifest-192x192.png"))
+        candidates.push(pathMod.join(appPath, "out", "renderer", "favicon-96x96.png"))
       } catch {
         // ignore
       }
       try {
         candidates.push(pathMod.join(process.resourcesPath, "icons", "icon.ico"))
+        candidates.push(pathMod.join(process.resourcesPath, "icon.ico"))
+        candidates.push(pathMod.join(process.resourcesPath, "..", "icon.ico"))
+      } catch {
+        // ignore
+      }
+      try {
+        const exeIcon = app.getPath("exe")
+        if (exeIcon) candidates.push(exeIcon)
       } catch {
         // ignore
       }
       for (const candidate of candidates) {
         try {
           const image = nativeImage.createFromPath(candidate)
-          if (!image.isEmpty()) return image.resize({ width: 16, height: 16 })
+          if (image.isEmpty()) continue
+          const sized = image.resize({ width: 16, height: 16 })
+          if (!sized.isEmpty()) return sized
+          return image
         } catch {
           // try next
         }
@@ -187,7 +216,9 @@
 
     await app.whenReady()
 
-    const tray = new Tray(resolveIcon())
+    const icon = resolveIcon()
+    // 图标为空时 Electron 仍会创建托盘, 只是不可见; 这里补一个最小占位符避免“看起来没生效”。
+    const tray = new Tray(icon.isEmpty() ? nativeImage.createEmpty() : icon)
     tray.setToolTip("OpenCode")
     tray.setContextMenu(
       Menu.buildFromTemplate([
@@ -200,7 +231,7 @@
     // 双击也能唤醒
     tray.on("double-click", showWindow)
     globalThis.__ocExitTray = { tray, showWindow, quitAll }
-    console.info("[oc-exit] tray installed")
+    console.info("[oc-exit] tray installed", { iconEmpty: icon.isEmpty() })
   } catch (error) {
     try {
       console.error("[oc-exit] tray injection failed:", error)
