@@ -24,7 +24,7 @@
 
   if (window.__ocDeepSeekBalance) return
 
-  const VERSION = "0.3.0"
+  const VERSION = "0.3.1"
   const LS_KEY = "oc-deepseek-balance:apiKey"
   const LS_BASE = "oc-deepseek-balance:serverBase"
   const RPC_ID = "deepseek.balance.v1"
@@ -328,40 +328,57 @@
 
   // ── UI 注入 ──────────────────────────────────────────────────────────────
   //
-  // 2.2.x 结构 (来自 out/renderer/assets/main-*.js 的 Z3t 组件):
+  // 2.2.x 结构 (来自 out/renderer/assets/main-*.js 的 Z3t 组件, 通过 session.header 插槽渲染):
   //   .session-header-actions
-  //     └ button[aria-label="查看上下文用量"]        ← 右上角「上下文小圆圈」的触发器
-  //         └ svg[data-component="progress-circle"][data-appearance="indicator"]
-  // 余额直接作为该 button 的**兄弟节点**挂在右侧, 不再依赖旧版 w-[120px] 悬浮容器。
+  //     └ <圆圈触发器>                              ← 右上角「上下文用量」小圆圈
+  //         variant="button"    → button[aria-label=查看上下文用量] > span > span > div > svg[data-appearance=compact]
+  //         variant="indicator" → div.flex.items-center.justify-center > svg[data-appearance=indicator]  (无 button 祖先)
+  // 因此徽标锚点不能写死 button: 先找 button, 找不到就沿 svg 向上爬到动作区的直接子节点。
+  // 余额徽标作为该锚点的**兄弟节点**挂在右侧。
 
-  const CIRCLE_SVG = 'svg[data-component="progress-circle"][data-appearance="indicator"]'
+  const CIRCLE_SVG = 'svg[data-component="progress-circle"]'
+  const HEADER_ACTIONS = ".session-header-actions"
+  const TAB_SCOPE = '[role="tab"],[data-slot="tab-link"],[data-slot="tabs-v"],[data-slot="vertical-tabs-mount"]'
+  const TOOLTIP_SCOPE = '[role="dialog"],[data-popper-positioner],[data-slot="popover-content"]'
 
-  /** 右上角圆圈按钮: 只在 session header 的动作区里找, 避开标签栏里的同名圆圈。 */
-  function findCircleButton() {
-    const actions = document.querySelector(".session-header-actions")
-    if (actions) {
-      for (const svg of actions.querySelectorAll(CIRCLE_SVG)) {
+  /**
+   * 解析右上角动作区锚点 → { parent, before }。
+   * before 非空 = 插到该节点之后; before 为空 = 追加到 parent 末尾。
+   */
+  function findHeaderAnchor() {
+    const actions = document.querySelector(HEADER_ACTIONS)
+    const scopes = actions ? [actions] : [document.body || document.documentElement]
+    for (const scope of scopes) {
+      if (!scope) continue
+      for (const svg of scope.querySelectorAll(CIRCLE_SVG)) {
+        // 跳过标签栏里的同名圆圈
+        if (svg.closest(TAB_SCOPE)) continue
         const button = svg.closest("button")
-        if (button) return button
+        if (button && button.parentElement) return { parent: button.parentElement, before: button }
+        let node = svg
+        while (node.parentElement && node.parentElement !== scope) node = node.parentElement
+        if (node.parentElement === scope) return { parent: scope, before: node }
       }
-      return null
     }
-    // 兜底: 头部容器改名时全局找, 但排除标签栏里的同名圆圈
-    for (const svg of document.querySelectorAll(CIRCLE_SVG)) {
-      const button = svg.closest("button")
-      if (!button) continue
-      if (button.closest('[role="tab"],[data-slot="tab-link"],[data-slot="tabs-v"],[data-slot="vertical-tabs-mount"]')) continue
-      return button
-    }
+    // 圆圈还没渲染出来 (未选中会话 / 旧版布局): 退化成动作区末尾
+    if (actions) return { parent: actions, before: actions.lastElementChild }
+    // 连动作区都没渲染 (会话页还没挂载): 挂到 header 布局最右侧
+    const layout = document.querySelector(".session-header-layout")
+    if (layout) return { parent: layout, before: layout.lastElementChild }
     return null
+  }
+
+  /** 只在内容变化时写文本, 避免 MutationObserver 自激。 */
+  function setText(node, text) {
+    if (node && node.textContent !== text) node.textContent = text
   }
 
   /** 圆圈右侧的余额徽标。 */
   function ensureHeaderBadge() {
-    const circle = findCircleButton()
-    if (!circle) return
-    const parent = circle.parentElement
-    if (!parent) return
+    const anchor = findHeaderAnchor()
+    if (!anchor || !anchor.parent) return
+    const parent = anchor.parent
+    const before = anchor.before
 
     let badge = parent.querySelector(`[${MARK}="badge"]`)
     if (!badge) {
@@ -382,31 +399,43 @@
         event.stopPropagation()
         void refresh()
       })
-      circle.insertAdjacentElement("afterend", badge)
-    } else if (badge.previousElementSibling !== circle) {
-      // Solid 重渲染后可能换了位置, 拉回圆圈右侧
-      circle.insertAdjacentElement("afterend", badge)
+    }
+
+    // Solid 重渲染后可能换了位置, 拉回锚点右侧 (幂等: 已在位就不动)
+    const anchorBefore = before && before !== badge ? before : null
+    const placed = anchorBefore ? anchorBefore.nextElementSibling === badge : parent.lastElementChild === badge
+    if (!placed) {
+      if (anchorBefore && anchorBefore.parentElement === parent) anchorBefore.insertAdjacentElement("afterend", badge)
+      else parent.appendChild(badge)
     }
 
     const value = badge.lastElementChild
-    if (value) value.textContent = compact(state.snapshot)
-    badge.title = `${detailText(state.snapshot)}\n点击刷新`
+    if (value) setText(value, compact(state.snapshot))
+    const title = `${detailText(state.snapshot)}\n点击刷新`
+    if (badge.title !== title) badge.title = title
   }
 
-  /** 新版悬浮层: role=dialog 的内容区里追加「余额」行 (样式对齐 usage 行)。 */
+  /** 悬浮层: 在 usage 行之后追加「余额」行 (样式直接复用 usage 行, 兼容外层容器改名)。 */
+  function closestTooltip(node) {
+    let current = node
+    for (let depth = 0; depth < 6 && current; depth += 1) {
+      if (typeof current.matches === "function" && current.matches(TOOLTIP_SCOPE)) return current
+      current = current.parentElement
+    }
+    return null
+  }
+
   function ensureTooltipRow() {
     const rows = document.querySelectorAll("div.h-7.items-center.gap-4")
     for (const row of rows) {
-      const content = row.parentElement
-      if (!content || content.getAttribute("role") !== "dialog") continue
+      if (row.getAttribute(MARK) === "tooltip") continue
       if (row.children.length !== 2) continue
+      if (!closestTooltip(row.parentElement)) continue
 
-      let mine = content.querySelector(`[${MARK}="tooltip"]`)
+      let mine = row.parentElement.querySelector(`[${MARK}="tooltip"]`)
       if (!mine) {
         mine = document.createElement("div")
-        mine.className =
-          "flex h-7 min-w-0 items-center gap-4 px-3 text-[13px] font-[440] " +
-          "leading-[var(--line-height-compact)] tracking-[-0.04px]"
+        mine.className = row.className
         mine.setAttribute(MARK, "tooltip")
         const name = document.createElement("span")
         name.className = "shrink-0 text-v2-text-text-muted"
@@ -414,14 +443,15 @@
         const value = document.createElement("span")
         value.className = "ml-auto min-w-0 truncate text-right tabular-nums text-v2-text-text-base"
         mine.append(name, value)
-        const separator = content.querySelector('[role="separator"]')
-        content.insertBefore(mine, separator ?? content.lastElementChild)
+        row.insertAdjacentElement("afterend", mine)
       }
       const value = mine.lastElementChild
       if (value) {
-        value.textContent = compact(state.snapshot)
-        value.title = detailText(state.snapshot)
+        setText(value, compact(state.snapshot))
+        const title = detailText(state.snapshot)
+        if (value.title !== title) value.title = title
       }
+      break
     }
   }
 
@@ -443,7 +473,7 @@
         grid.appendChild(stat)
       } else {
         const value = grid.querySelector(`[${MARK}="stat"] div:last-child`)
-        if (value) value.textContent = compact(state.snapshot)
+        if (value) setText(value, compact(state.snapshot))
       }
       ensureDetailCard(grid)
     }
@@ -466,7 +496,7 @@
       grid.insertAdjacentElement("afterend", card)
     }
     const body = card.lastElementChild
-    if (body) body.textContent = detailText(state.snapshot)
+    if (body) setText(body, detailText(state.snapshot))
   }
 
   function apply() {

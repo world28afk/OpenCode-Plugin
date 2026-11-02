@@ -98,9 +98,12 @@ if (existsSync(injectPath)) {
   check("injector wraps RPC payload as { input }", inject.includes("JSON.stringify({ input: {} })"))
   check("injector reads RPC { output } wrapper", inject.includes("json.output"))
   check(
-    "injector anchors header circle (session-header-actions + progress-circle)",
-    inject.includes('svg[data-component="progress-circle"][data-appearance="indicator"]') &&
-      inject.includes(".session-header-actions"),
+    "injector anchors header circle (session-header-actions + progress-circle, 兼容无 button 的 indicator 布局)",
+    inject.includes(".session-header-actions") &&
+      inject.includes('svg[data-component="progress-circle"]') &&
+      inject.includes("findHeaderAnchor") &&
+      inject.includes('svg.closest("button")') &&
+      inject.includes("node.parentElement !== scope"),
   )
   check("injector mounts badge right of circle (insertAdjacentElement afterend)", inject.includes('insertAdjacentElement("afterend", badge)'))
   check("injector targets 2.2.x tooltip dialog rows", inject.includes("div.h-7.items-center.gap-4"))

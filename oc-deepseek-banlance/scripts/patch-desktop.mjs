@@ -19,13 +19,15 @@ import { fileURLToPath } from "node:url"
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..")
 const injectSource = join(root, "desktop", "oc-balance-inject.js")
-const defaultApp = join(
-  process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local"),
-  "Programs",
-  "@opencodedesktop",
-  "resources",
-  "app.asar",
-)
+// 2.x 起安装目录从 @opencodedesktop 改成 ai.opencode.desktop，两处都探一遍
+const defaultApp = (() => {
+  const local = process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local")
+  const candidates = [
+    join(local, "Programs", "ai.opencode.desktop", "resources", "app.asar"),
+    join(local, "Programs", "@opencodedesktop", "resources", "app.asar"),
+  ]
+  return candidates.find((item) => existsSync(item)) ?? candidates[0]
+})()
 
 const args = process.argv.slice(2)
 const dryRun = args.includes("--dry-run")
