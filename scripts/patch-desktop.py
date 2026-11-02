@@ -5,23 +5,29 @@
 # OpenCode Desktop 桌面注入补丁 —— 跨平台版（macOS / Windows, 无 Node 依赖）
 #
 # 作用与各插件自带的 scripts/patch-desktop.mjs（Node + npx @electron/asar）等效:
-# 把 desktop/*-inject.js 写入 app.asar 的 renderer 目录, 并在 index.html 里加 <script> 标签。
+#   1) renderer 注入: 把 desktop/*-inject.js / *-dock.js 写入 app.asar 的 renderer 目录,
+#      并在 index.html 里加 <script> 标签;
+#   2) main 注入: 把 desktop/*-tray.js 追加到主进程入口（默认 out/main/index.js）,
+#      用 /* <插件>:tray:start */ … /* <插件>:tray:end */ 标记包裹（当前为 oc-exit 托盘）。
 # 区别:
 #   • 纯 Python 3 标准库, 不需要 node / npm / npx（macOS 上通常没有 node）;
 #   • 一次运行可以同时修补多个插件（共用同一个 app.asar, 不重复提取/重打包 124MB 文件）;
 #   • 追加式改写: 旧数据区按原样保留, 新条目追加到 asar 末尾 —— 各文件既有 offset 不变,
 #     正在运行的桌面端不受影响（重启后生效）;
+#   • --in-place 会把 header 区块补齐到与原来完全相同的长度, 因此运行中的实例缓存的
+#     data_start / offset 全部继续有效（这是「不重启也能安全写盘」的关键）;
 #   • 与 .mjs 完全互相兼容: 相同的标签、插入位置与备份文件名, 两边都可以 --restore / --unpatch。
 #
-# 适用插件: 采用 renderer 注入（desktop/*-inject.js 或 desktop/*-dock.js → out/renderer/index.html）的插件,
-# 当前为 oc-cyberbot / oc-deepseek-banlance / oc-plugin-manager / oc-purge。
-# oc-exit 为主进程托盘注入（Windows 专属, 注入 out/main/index.js）, 不在本脚本范围内。
-# oc-infinite-gen-4 已停用（见 DISABLED_PLUGINS, 不再注入）。
+# 适用插件:
+#   renderer 注入: oc-cyberbot / oc-deepseek-banlance / oc-plugin-manager / oc-purge
+#   main   注入: oc-exit（Windows 系统托盘, 注入 out/main/index.js）
+#   oc-infinite-gen-4 已停用（见 DISABLED_PLUGINS, 不再注入）。
 #
 # 用法:
 #   python3 scripts/patch-desktop.py                     # 注入全部（自动备份, 原子替换）
+#   python3 scripts/patch-desktop.py --in-place          # 桌面端运行中原地热更新（重启后生效）
 #   python3 scripts/patch-desktop.py --dry-run           # 只验证, 不改动安装
-#   python3 scripts/patch-desktop.py --only oc-purge
+#   python3 scripts/patch-desktop.py --only oc-purge oc-exit
 #   python3 scripts/patch-desktop.py --unpatch                           # 移除全部注入
 #   python3 scripts/patch-desktop.py --unpatch oc-deepseek-banlance      # 只移除指定插件
 #   python3 scripts/patch-desktop.py --restore           # 从首次备份还原
@@ -55,11 +61,22 @@ for _stream in (sys.stdout, sys.stderr):
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 INJECT_SUFFIXES = ("-inject.js", "-dock.js")  # 兼容 *.mjs 各插件的命名（-inject.js / -dock.js）
+MAIN_INJECT_SUFFIX = "-tray.js"              # 主进程注入（oc-exit 系统托盘）
 BLOCK_SIZE = 4194304  # 与 @electron/asar 的 integrity 分块一致（4 MiB）
 
 # 已停用/除名的插件：源码保留，但不再注入桌面端（防止全量重打把旧 UI 又注回去）。
 # oc-infinite-gen-4 已从 OpenCode 移除（badge UI 亦已从 app.asar 清理）。
 DISABLED_PLUGINS = {"oc-infinite-gen-4"}
+
+# 主进程注入清单：文件名 → 标记与目标文件。
+# 标记必须与各插件自带 patch-desktop.mjs 完全一致，两边才能互相 --unpatch。
+MAIN_INJECTS = {
+    "oc-exit-tray.js": {
+        "mark_start": "/* oc-exit:tray:start */",
+        "mark_end": "/* oc-exit:tray:end */",
+        "target": "out/main/index.js",
+    },
+}
 
 
 class AsarError(RuntimeError):
@@ -76,7 +93,7 @@ def fail(message: str) -> None:
 # ---------------------------------------------------------------------------
 
 def discover_plugins():
-    """扫描工作区内采用 renderer 注入的插件: oc-*/desktop/*-inject.js。"""
+    """扫描工作区内的插件注入片段: oc-*/desktop/*-inject.js（renderer）+ *-tray.js（main）。"""
     plugins = []
     for child in sorted(REPO_ROOT.iterdir()):
         if not child.is_dir() or not child.name.startswith("oc-"):
@@ -91,12 +108,31 @@ def discover_plugins():
                 base = source.name[: -len(suffix)]  # 例: oc-balance-inject.js -> oc-balance
                 plugins.append(
                     {
+                        "kind": "renderer",
                         "name": child.name,                 # 目录名, 例: oc-deepseek-banlance
                         "source": source,                   # desktop/oc-balance-inject.js
                         "inject_name": source.name,         # 注入到 renderer 的文件名
                         "backup_suffix": f".{base}.bak",    # 与 .mjs 一致: app.asar.oc-balance.bak
                     }
                 )
+        for source in sorted(desktop.glob(f"*{MAIN_INJECT_SUFFIX}")):
+            spec = MAIN_INJECTS.get(source.name)
+            if not spec:
+                print(f"warning: 未登记的主进程注入片段, 已跳过: {source}")
+                continue
+            base = source.name[: -len(MAIN_INJECT_SUFFIX)]  # oc-exit-tray.js -> oc-exit
+            plugins.append(
+                {
+                    "kind": "main",
+                    "name": child.name,
+                    "source": source,
+                    "inject_name": source.name,
+                    "backup_suffix": f".{base}.bak",
+                    "mark_start": spec["mark_start"],
+                    "mark_end": spec["mark_end"],
+                    "target": spec["target"].strip("/"),
+                }
+            )
     return plugins
 
 
@@ -110,6 +146,10 @@ def select(plugins, names):
         available = ", ".join(p["name"] for p in plugins)
         fail(f"未知插件: {', '.join(missing)}（可用: {available}）")
     return chosen
+
+
+def describe(plugins):
+    return ", ".join(f"{p['name']}({p['kind']})" for p in plugins)
 
 
 # ---------------------------------------------------------------------------
@@ -152,8 +192,19 @@ def parse_asar(blob: bytes):
     return header, 16 + strlen + pad
 
 
-def build_header(header) -> bytes:
+def build_header(header, pad_to=None) -> bytes:
+    """序列化 header。
+
+    pad_to: 期望的 header 区块总字节数（必须是 4 的倍数）。
+            JSON 允许尾随空白，用空格补齐即可让 data_start 保持不变 ——
+            这样运行中的桌面端缓存的 offset 仍然指向正确的数据。
+    """
     data = json.dumps(header, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    if pad_to is not None:
+        want = pad_to - 16
+        if len(data) > want:
+            raise AsarError(f"header 比原区块长 {len(data) - want} 字节, 无法等长填充")
+        data = data + b" " * (want - len(data))
     pad = (4 - len(data) % 4) % 4
     payload = 4 + len(data) + pad
     return (
@@ -204,10 +255,6 @@ def integrity_of(content: bytes) -> dict:
     }
 
 
-def make_entry(content: bytes, offset: int) -> dict:
-    return {"size": len(content), "offset": str(offset), "integrity": integrity_of(content)}
-
-
 def find_renderer_index(header) -> str:
     """与 .mjs 相同的选择规则: 优先路径含 renderer, 其次路径最短。"""
     candidates = [path for path, _ in iter_entries(header["files"]) if path.endswith("index.html")]
@@ -217,105 +264,165 @@ def find_renderer_index(header) -> str:
     return candidates[0]
 
 
+def strip_block(text: str, mark_start: str, mark_end: str) -> str:
+    start_index = text.find(mark_start)
+    if start_index < 0:
+        return text
+    end_index = text.find(mark_end, start_index)
+    if end_index < 0:
+        return text
+    return text[:start_index] + text[end_index + len(mark_end) :]
+
+
+class Appender:
+    """把新内容追加到数据区末尾, 并更新对应条目（旧数据原样保留）。"""
+
+    def __init__(self, data: bytes):
+        self.data = data
+        self.appended = bytearray()
+
+    def put(self, entry, content: bytes) -> int:
+        offset = len(self.data) + len(self.appended)
+        self.appended += content
+        entry["offset"] = str(offset)
+        entry["size"] = len(content)
+        entry["integrity"] = integrity_of(content)
+        return offset
+
+
 # ---------------------------------------------------------------------------
 # 计划（注入 / 移除）：只改 header JSON + 在数据区末尾追加新内容, 既有条目 offset 不动。
 # ---------------------------------------------------------------------------
 
-def plan_apply(blob: bytes, header, data_start: int, plugins):
-    index_path = find_renderer_index(header)
-    live_index = entry_map(header)[index_path]
-    html = read_file(blob, data_start, live_index).decode("utf-8")
-
+def plan_apply(blob: bytes, header, data_start: int, renderer_plugins, main_plugins):
     data = blob[data_start:]
-    appended = bytearray()
+    appender = Appender(data)
+    index_path = None
     inserted = []
-    parent_parts = [p for p in index_path.rsplit("/", 1)[0].strip("/").split("/") if p]
-    parent = dir_node(header, parent_parts) if parent_parts else header["files"]
+    main_changed = []
 
-    for plugin in plugins:
-        name = plugin["inject_name"]
-        content = plugin["source"].read_bytes()
-        if name not in html:
-            tag = f'  <script src="./{name}"></script>\n'
-            if "</body>" in html:
-                html = html.replace("</body>", tag + "</body>", 1)
-            elif "</head>" in html:
-                html = html.replace("</head>", tag + "</head>", 1)
-            else:
-                html += tag
-            inserted.append(name)
-        offset = len(data) + len(appended)
-        appended += content
-        parent["files"][name] = make_entry(content, offset)
+    if renderer_plugins:
+        index_path = find_renderer_index(header)
+        live_index = entry_map(header)[index_path]
+        html = read_file(blob, data_start, live_index).decode("utf-8")
 
-    html_bytes = html.encode("utf-8")
-    html_offset = len(data) + len(appended)
-    appended += html_bytes
-    live_index["offset"] = str(html_offset)
-    live_index["size"] = len(html_bytes)
-    live_index["integrity"] = integrity_of(html_bytes)
+        parent_parts = [p for p in index_path.rsplit("/", 1)[0].strip("/").split("/") if p]
+        parent = dir_node(header, parent_parts) if parent_parts else header["files"]
 
-    return build_header(header) + data + bytes(appended), index_path, inserted
+        for plugin in renderer_plugins:
+            name = plugin["inject_name"]
+            content = plugin["source"].read_bytes()
+            if name not in html:
+                tag = f'  <script src="./{name}"></script>\n'
+                if "</body>" in html:
+                    html = html.replace("</body>", tag + "</body>", 1)
+                elif "</head>" in html:
+                    html = html.replace("</head>", tag + "</head>", 1)
+                else:
+                    html += tag
+                inserted.append(name)
+            appender.put(parent["files"].setdefault(name, {}), content)
 
-
-def plan_unpatch(blob: bytes, header, data_start: int, plugins):
-    index_path = find_renderer_index(header)
-    live_index = entry_map(header)[index_path]
-    html = read_file(blob, data_start, live_index).decode("utf-8")
-    names = {p["inject_name"] for p in plugins}
-
-    html_changed = any(n in html for n in names)
-    if html_changed:
-        html = "\n".join(
-            line for line in html.split("\n") if not any(n in line for n in names)
-        )
-
-    parent_parts = [p for p in index_path.rsplit("/", 1)[0].strip("/").split("/") if p]
-    parent = dir_node(header, parent_parts) if parent_parts else header["files"]
-    removed = []
-    for plugin in plugins:
-        if plugin["inject_name"] in parent["files"]:
-            del parent["files"][plugin["inject_name"]]
-            removed.append(plugin["inject_name"])
-
-    if not html_changed and not removed:
-        return None, index_path, removed
-
-    data = blob[data_start:]
-    appended = bytearray()
-    if html_changed:
         html_bytes = html.encode("utf-8")
-        offset = len(data) + len(appended)
-        appended += html_bytes
-        live_index["offset"] = str(offset)
-        live_index["size"] = len(html_bytes)
-        live_index["integrity"] = integrity_of(html_bytes)
+        appender.put(live_index, html_bytes)
 
-    return build_header(header) + data + bytes(appended), index_path, removed
+    for plugin in main_plugins:
+        target = plugin["target"]
+        entry = entry_map(header).get("/" + target)
+        if entry is None:
+            raise AsarError(f"asar 中未找到主进程入口: /{target}")
+        text = read_file(blob, data_start, entry).decode("utf-8")
+        text = strip_block(text, plugin["mark_start"], plugin["mark_end"])  # 幂等
+        snippet = plugin["source"].read_text(encoding="utf-8")
+        block = f"\n;{plugin['mark_start']}\n{snippet}\n;{plugin['mark_end']}\n"
+        appender.put(entry, (text + block).encode("utf-8"))
+        main_changed.append(target)
+
+    return header, appender.appended, index_path, inserted, main_changed
+
+
+def plan_unpatch(blob: bytes, header, data_start: int, renderer_plugins, main_plugins):
+    data = blob[data_start:]
+    appender = Appender(data)
+    index_path = None
+    removed = []
+    main_changed = []
+
+    if renderer_plugins:
+        index_path = find_renderer_index(header)
+        live_index = entry_map(header)[index_path]
+        html = read_file(blob, data_start, live_index).decode("utf-8")
+        names = {p["inject_name"] for p in renderer_plugins}
+
+        html_changed = any(n in html for n in names)
+        if html_changed:
+            html = "\n".join(line for line in html.split("\n") if not any(n in line for n in names))
+            appender.put(live_index, html.encode("utf-8"))
+
+        parent_parts = [p for p in index_path.rsplit("/", 1)[0].strip("/").split("/") if p]
+        parent = dir_node(header, parent_parts) if parent_parts else header["files"]
+        for plugin in renderer_plugins:
+            if plugin["inject_name"] in parent["files"]:
+                del parent["files"][plugin["inject_name"]]
+                removed.append(plugin["inject_name"])
+
+        if not html_changed and not removed:
+            index_path = None
+
+    for plugin in main_plugins:
+        target = plugin["target"]
+        entry = entry_map(header).get("/" + target)
+        if entry is None:
+            continue
+        text = read_file(blob, data_start, entry).decode("utf-8")
+        next_text = strip_block(text, plugin["mark_start"], plugin["mark_end"])
+        if next_text == text:
+            continue
+        appender.put(entry, next_text.encode("utf-8"))
+        main_changed.append(target)
+
+    if index_path is None and not main_changed:
+        return None, None, removed, main_changed
+    return header, appender.appended, index_path, removed, main_changed
 
 
 # ---------------------------------------------------------------------------
 # 校验：把写出的内容重新解析, 逐项核对
 # ---------------------------------------------------------------------------
 
-def validate(blob: bytes, plugins, mode: str):
+def validate(blob: bytes, renderer_plugins, main_plugins, mode: str):
     header, data_start = parse_asar(blob)
     emap = entry_map(header)
-    index_path = find_renderer_index(header)
-    parent_dir = index_path.rsplit("/", 1)[0]
-    html = read_file(blob, data_start, emap[index_path]).decode("utf-8")
     checks = []
-    for plugin in plugins:
-        name = plugin["inject_name"]
-        full_path = f"{parent_dir}/{name}"
+
+    if renderer_plugins:
+        index_path = find_renderer_index(header)
+        parent_dir = index_path.rsplit("/", 1)[0]
+        html = read_file(blob, data_start, emap[index_path]).decode("utf-8")
+        for plugin in renderer_plugins:
+            name = plugin["inject_name"]
+            full_path = f"{parent_dir}/{name}"
+            if mode == "unpatch":
+                checks.append((f"index.html 不再引用 {name}", name not in html))
+                checks.append((f"条目已移除: {name}", full_path not in emap))
+            else:
+                checks.append((f"index.html 引用 {name}", name in html))
+                entry = emap.get(full_path)
+                same = entry is not None and read_file(blob, data_start, entry) == plugin["source"].read_bytes()
+                checks.append((f"注入文件内容一致: {name}", same))
+
+    for plugin in main_plugins:
+        entry = emap.get("/" + plugin["target"])
+        if entry is None:
+            checks.append((f"主进程入口存在: /{plugin['target']}", False))
+            continue
+        text = read_file(blob, data_start, entry).decode("utf-8")
         if mode == "unpatch":
-            checks.append((f"index.html 不再引用 {name}", name not in html))
-            checks.append((f"条目已移除: {name}", full_path not in emap))
+            checks.append((f"{plugin['target']} 已移除 {plugin['name']} 注入块", plugin["mark_start"] not in text))
         else:
-            checks.append((f"index.html 引用 {name}", name in html))
-            entry = emap.get(full_path)
-            same = entry is not None and read_file(blob, data_start, entry) == plugin["source"].read_bytes()
-            checks.append((f"注入文件内容一致: {name}", same))
+            snippet = plugin["source"].read_text(encoding="utf-8")
+            checks.append((f"{plugin['target']} 含 {plugin['name']} 注入块", plugin["mark_start"] in text))
+            checks.append((f"{plugin['target']} 注入内容完整: {plugin['name']}", snippet in text))
     return checks
 
 
@@ -337,12 +444,15 @@ def do_restore(app: Path, plugins):
 def run(args):
     plugins = discover_plugins()
     if not plugins:
-        fail("未发现任何 desktop/*-inject.js 插件")
+        fail("未发现任何 desktop/*-inject.js 或 desktop/*-tray.js 注入片段")
 
-    print("插件      : " + ", ".join(p["name"] for p in plugins))
+    print("插件      : " + describe(plugins))
     if args.only:
         plugins = select(plugins, args.only)
-        print("选择      : " + ", ".join(p["name"] for p in plugins))
+        print("选择      : " + describe(plugins))
+
+    renderer_plugins = [p for p in plugins if p["kind"] == "renderer"]
+    main_plugins = [p for p in plugins if p["kind"] == "main"]
 
     app = Path(args.app).expanduser() if args.app else default_app_asar()
     if app is None:
@@ -361,30 +471,71 @@ def run(args):
 
     if args.unpatch is not None:
         targets = select(plugins, args.unpatch)
+        targets_renderer = [p for p in targets if p["kind"] == "renderer"]
+        targets_main = [p for p in targets if p["kind"] == "main"]
         print("模式      : 移除注入")
-        result, index_path, removed = plan_unpatch(blob, header, data_start, targets)
-        if result is None:
+        header, appended, index_path, removed, main_changed = plan_unpatch(
+            blob, header, data_start, targets_renderer, targets_main
+        )
+        if header is None:
             print("未发现本插件注入, 无需移除")
             return
-        print(f"renderer  : {index_path}")
+        if index_path:
+            print(f"renderer  : {index_path}")
         for name in removed:
             print(f"已移除标签与文件: {name}")
-        patched = result
+        for name in main_changed:
+            print(f"已移除主进程注入块: {name}")
         validate_mode = "unpatch"
+        targets = targets_renderer + targets_main
     else:
         targets = plugins
         print("模式      : " + ("dry-run（不改动安装）" if args.dry_run else "注入"))
-        patched, index_path, inserted = plan_apply(blob, header, data_start, targets)
-        print(f"renderer  : {index_path}")
+        header, appended, index_path, inserted, main_changed = plan_apply(
+            blob, header, data_start, renderer_plugins, main_plugins
+        )
+        if index_path:
+            print(f"renderer  : {index_path}")
         for name in inserted:
             print(f"已写入 <script> 标签: {name}")
+        for name in main_changed:
+            print(f"已写入主进程注入块: {name}")
         validate_mode = "apply"
+        targets = plugins
+
+    pad_to = data_start if args.in_place else None
+    if args.in_place and args.unpatch is not None:
+        fail("--in-place 只支持注入模式")
+    try:
+        header_block = build_header(header, pad_to=pad_to)
+    except AsarError as exc:
+        if pad_to is None:
+            raise
+        # 兜底: 去掉被改动条目的 integrity 以缩短 header（读取不依赖 integrity）
+        for plugin in targets:
+            entry = None
+            if plugin["kind"] == "main":
+                entry = entry_map(header).get("/" + plugin["target"])
+            if entry is not None:
+                entry.pop("integrity", None)
+        try:
+            header_block = build_header(header, pad_to=pad_to)
+            print("提示      : 为等长写入已省略被改动条目的 integrity 字段（不影响读取）")
+        except AsarError as exc2:
+            fail(f"{exc2}；请完全退出 OpenCode Desktop 后重新执行（去掉 --in-place）")
+
+    patched = header_block + blob[data_start:] + bytes(appended)
 
     if args.dry_run:
         target = Path(tempfile.gettempdir()) / f"oc-patch-desktop-test-{int(time.time())}.asar"
         target.write_bytes(patched)
         print(f"写入中… → (测试产物) {target}")
-        checks = validate(target.read_bytes(), targets, validate_mode)
+        checks = validate(
+            target.read_bytes(),
+            [p for p in targets if p["kind"] == "renderer"],
+            [p for p in targets if p["kind"] == "main"],
+            validate_mode,
+        )
         for label, ok in checks:
             print(f"  [{'✓' if ok else '✗'}] {label}")
         if not all(ok for _, ok in checks):
@@ -400,22 +551,13 @@ def run(args):
                 print(f"已备份  : {backup}")
 
     if args.in_place:
-        # 原地热更新：仅在 header 区块长度不变时安全（已有条目的 offset 全部保留）。
+        # 原地热更新：header 区块长度不变 → data_start 不变 → 运行中的实例不受影响。
         # 顺序 = 先追加数据区（旧 header 仍然有效）→ 再覆盖 header → 最后校正长度，
-        # 因此运行中的桌面端在重启前仍读到旧 index.html，不会读到错位内容。
-        if args.unpatch is not None:
-            fail("--in-place 只支持注入模式")
-        header_block = patched[:data_start]
-        appended = patched[len(blob):]
-        if len(header_block) != data_start:
-            fail(
-                "header 区块长度发生变化（本次注入改变了 header 大小），"
-                "原地热更新不安全：请完全退出 OpenCode Desktop 后重新执行"
-            )
+        # 因此运行中的桌面端在重启前仍读到旧内容，不会读到错位数据。
         try:
             with open(app, "r+b") as fh:
                 fh.seek(len(blob))
-                fh.write(appended)
+                fh.write(bytes(appended))
                 fh.flush()
                 fh.seek(0)
                 fh.write(header_block)
@@ -423,7 +565,7 @@ def run(args):
                 fh.flush()
         except OSError as exc:
             fail(f"原地写入失败: {exc}")
-        print(f"原地热更新: 追加 {len(appended)} 字节（header 长度未变, 已有条目偏移全部保留）")
+        print(f"原地热更新: 追加 {len(appended)} 字节（header 长度不变, 已有条目偏移全部保留）")
     else:
         tmp = app.parent / f".{app.name}.tmp-{os.getpid()}.asar"
         try:
@@ -442,7 +584,12 @@ def run(args):
                 "或在桌面端运行时加 --in-place 做原地热更新"
             )
 
-    checks = validate(app.read_bytes(), targets, validate_mode)
+    checks = validate(
+        app.read_bytes(),
+        [p for p in targets if p["kind"] == "renderer"],
+        [p for p in targets if p["kind"] == "main"],
+        validate_mode,
+    )
     for label, ok in checks:
         print(f"  [{'✓' if ok else '✗'}] {label}")
     if not all(ok for _, ok in checks):
@@ -466,7 +613,7 @@ def main():
     parser.add_argument(
         "--in-place",
         action="store_true",
-        help="桌面端仍在运行时原地热更新（追加式, 已有条目偏移不变, 重启后生效）",
+        help="桌面端仍在运行时原地热更新（追加式 + header 等长填充, 重启后生效）",
     )
     parser.add_argument("--restore", action="store_true", help="从首次备份还原")
     parser.add_argument(

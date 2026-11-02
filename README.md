@@ -24,7 +24,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\sync-plugins.ps1
 
 # 2) 桌面注入（各插件自带, 互不影响）
 node .\oc-plugin-manager\scripts\patch-desktop.mjs          # 插件管理器开关
-node .\oc-exit\scripts\patch-desktop.mjs                    # 右下角退出角标
+node .\oc-exit\scripts\patch-desktop.mjs                    # 系统托盘 + 关闭收进托盘 + 彻底退出（主进程注入）
 node .\oc-purge\scripts\patch-desktop.mjs                   # 破甲 dock（输入框上方按钮 + 右侧面板）
 node .\oc-deepseek-banlance\scripts\patch-desktop.mjs       # 余额注入（如有）
 # 注: oc-infinite-gen-4 已停用, 不再注入桌面端（见根 scripts/patch-desktop.py 的 DISABLED_PLUGINS）
@@ -37,13 +37,13 @@ bun scripts/verify.mjs
 ### macOS / 无 Node 环境：`scripts/patch-desktop.py`
 
 Windows 的 `.mjs` 补丁工具依赖 Node + npx；macOS（或任何没有 Node 的机器）直接用根目录的
-跨平台 Python 版（仅标准库、无依赖，一次修补全部 renderer 注入插件）：
+跨平台 Python 版（仅标准库、无依赖，一次修补全部注入插件：renderer + 主进程）：
 
 ```bash
 python3 scripts/patch-desktop.py --dry-run                # 验证（不改动安装）
 python3 scripts/patch-desktop.py                          # 注入（自动备份, 原子替换）
 python3 scripts/patch-desktop.py --in-place               # 桌面端仍开着时原地热更新（重启后生效）
-python3 scripts/patch-desktop.py --only oc-purge          # 只处理指定插件
+python3 scripts/patch-desktop.py --only oc-purge oc-exit  # 只处理指定插件
 python3 scripts/patch-desktop.py --unpatch                # 移除注入（可跟插件名）
 python3 scripts/patch-desktop.py --restore                # 从备份还原
 ```
@@ -53,12 +53,14 @@ python3 scripts/patch-desktop.py --restore                # 从备份还原
 - 与 `.mjs` 完全互相兼容：相同标签/插入位置/备份文件名，可交叉 `--restore` / `--unpatch`。
 - 追加式改写（旧数据区原样保留），运行中的桌面端不受影响，重启后生效；重复执行安全（不产生重复标签）。
 - 默认走「临时文件 + 原子替换」，桌面端运行中会因文件占用失败；此时加 `--in-place`
-  原地热更新：先追加数据区、再覆盖 header、最后校正长度，且强制要求 header 区块长度不变
-  （否则已有条目偏移会错位，脚本会直接拒绝并提示退出桌面端后重试）。
+  原地热更新：先追加数据区、再覆盖 header、最后校正长度。header 区块会被**补齐到与原来完全相同的
+  字节长度**（JSON 尾随空格填充），因此 `data_start` 与全部既有条目偏移都保持不变 ——
+  运行中的实例继续按内存里的旧 header 读旧内容，不会读到错位数据。
 - macOS 若重开后被系统报「已损坏」：`xattr -dr com.apple.quarantine /Applications/OpenCode.app`。
-- 适用范围：renderer 注入插件（`oc-cyberbot` / `oc-deepseek-banlance` / `oc-plugin-manager` / `oc-purge`；
-  `oc-infinite-gen-4` 已停用不再注入）；
-  `oc-exit` 为主进程托盘注入（Windows 专属），不在其列。
+- 适用范围：renderer 注入插件（`oc-cyberbot` / `oc-deepseek-banlance` / `oc-plugin-manager` / `oc-purge`）
+  + 主进程注入插件（`oc-exit` 的 `desktop/oc-exit-tray.js` → `out/main/index.js`，
+  用 `/* oc-exit:tray:start */ … /* oc-exit:tray:end */` 标记）；
+  `oc-infinite-gen-4` 已停用不再注入。
 
 ## 约定
 
