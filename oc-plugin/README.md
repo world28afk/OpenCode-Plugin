@@ -5,7 +5,7 @@
 | 文档 | 内容 |
 | :--- | :--- |
 | [docs/opencode-plugin-development.md](docs/opencode-plugin-development.md) | OpenCode V2 插件开发完整指南：加载机制、服务端插件 API、TUI 插件 API、RPC、工具、会话钩子、桌面端 UI 注入、打包发布、测试与排错 |
-| [docs/dsh-to-opencode-migration.md](docs/dsh-to-opencode-migration.md) | DeepSeek Harness（DSH / Cordis）插件 → OpenCode 插件迁移指南：概念映射表、逐项改造步骤、真实移植案例（oc-infinite-gen-4 / oc-deepseek-banlance） |
+| [docs/dsh-to-opencode-migration.md](docs/dsh-to-opencode-migration.md) | DeepSeek Harness（DSH / Cordis）插件 → OpenCode 插件迁移指南：概念映射表、逐项改造步骤、真实移植案例（内核注入 + 桌面徽章 / oc-deepseek-banlance） |
 | [examples/](examples/) | 可复制的骨架与最小示例（服务端插件 / TUI 插件 / 桌面注入脚本 / 补丁器） |
 
 ## 版本基线

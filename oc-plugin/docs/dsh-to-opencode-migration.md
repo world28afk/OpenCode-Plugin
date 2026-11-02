@@ -1,8 +1,8 @@
 # DSH 插件 → OpenCode 插件迁移指南
 
 > 适用对象：DeepSeek Harness（DSH，Cordis 架构）插件 → OpenCode V2 插件。
-> 本文基于两个真实移植项目：
-> - `oc-infinite-gen-4`（仓库已删除）（上游 `Minglink/dsh-infinite-gen-4`）
+> 本文基于真实移植项目：
+> - 内核注入 + 桌面徽章案例（源码已删除；上游 `Minglink/dsh-infinite-gen-4`）
 > - [`world28afk/oc-deepseek-banlance`](https://github.com/world28afk/oc-deepseek-banlance)
 >
 > 开发 API 细节见 [opencode-plugin-development.md](opencode-plugin-development.md)。
@@ -113,7 +113,7 @@ ctx.effect(() => { ctx.tools.register(profileTool) })
 // OpenCode V2
 await ctx.tool.transform((editor) => {
   editor.add({
-    name: "infinite_gen4_profile",
+    name: "armor_profile",
     description: "...",
     input: { type: "object", properties: {}, additionalProperties: false },
     execute: async () => ({ content: JSON.stringify(profile(), null, 2) }),
@@ -126,7 +126,7 @@ await ctx.tool.transform((editor) => {
 ```js
 // DSH：投影注册
 const armorDef = { key: "armor", stateSchema: anySchema, init, apply: armorProjectionApply, wire: {...} }
-p.register(armorDef, "infinite-gen-4: armor projection")
+p.register(armorDef, "armor: projection")
 ```
 
 ```ts
@@ -144,14 +144,14 @@ ctx.slots.register({ name: "conversation.input.dock", id: "armor", order: 30 }, 
 
 ```tsx
 // OpenCode TUI（./tui 导出）
-context.ui.slot({ append: "prompt.footer.status", render: () => <text fg={green}>⚫ 无限四代 v0.4.1</text> })
+context.ui.slot({ append: "prompt.footer.status", render: () => <text fg={green}>⚫ ARMOR v0.4.1</text> })
 ```
 
 ```js
 // OpenCode Desktop：无 UI 插件接口 → DOM 注入（锚点来自真实渲染进程实测）
 const composer = document.querySelector('[data-component="composer"]')  // 输入框容器
 host.insertBefore(badge, composer)                                      // 输入框正上方
-// 运行状态经插件 RPC 确认: POST /api/rpc/infinite.gen4.profile/get
+// 运行状态经插件 RPC 确认: POST /api/rpc/armor.profile/get
 ```
 
 ### 4.5 宿主补丁
@@ -171,14 +171,14 @@ host.insertBefore(badge, composer)                                      // 输�
 
 ## 5. 案例研究
 
-### 5.1 oc-infinite-gen-4（内核注入 + 桌面徽章）
+### 5.1 内核注入 + 桌面徽章（历史案例）
 
 | 上游（DSH） | 移植（OpenCode V2） | 实测结果 |
 | :--- | :--- | :--- |
-| `systemPrompt.section` ×2（Order 100/200） | `session.hook("context")` push ×2 | 注入生效，`infinite_gen4_profile` 可见 `injection[].enabled=true` |
+| `systemPrompt.section` ×2（Order 100/200） | `session.hook("context")` push ×2 | 注入生效，`armor_profile` 可见 `injection[].enabled=true` |
 | `tools.register(profileTool)` | `tool.transform` | 工具可调用 |
-| `client.js` 状态条 | `tui.tsx`（TUI）+ `desktop/oc-infinite-gen-4-inject.js`（桌面） | 桌面端输入框上方绿框「无限四代 v0.4.1 · 运行中」（真实 Electron 验证） |
-| （新增）运行状态查询 | RPC `infinite.gen4.profile` | `POST /api/rpc/infinite.gen4.profile/get` → 200 |
+| `client.js` 状态条 | `tui.tsx`（TUI）+ `desktop/<name>-inject.js`（桌面） | 桌面端输入框上方绿框「ARMOR v0.4.1 · 运行中」（真实 Electron 验证） |
+| （新增）运行状态查询 | RPC `armor.profile` | `POST /api/rpc/armor.profile/get` → 200 |
 | `patcher.js` / `cordis.patch.yml` | 删除 | 无宿主文件改动 |
 
 ### 5.2 oc-deepseek-banlance（余额查看）
