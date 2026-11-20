@@ -62,9 +62,10 @@ check("LICENSE exists (MIT, upstream attribution)", existsSync(join(root, "LICEN
 const bundle = existsSync(skillsBundle)
   ? JSON.parse(gunzipSync(readFileSync(skillsBundle)).toString("utf8"))
   : { files: {} }
-const assetSkills = Object.keys(bundle.files || {})
-  .filter((name) => name.endsWith(".md"))
-  .sort()
+const bundleKeys = Object.keys(bundle.files || {}).sort()
+const skillIdOf = (key) => (key.includes("/") ? key.slice(0, key.indexOf("/")) : key.replace(/\.md$/, ""))
+const assetSkillIds = [...new Set(bundleKeys.map(skillIdOf))].sort()
+const assetSkills = bundleKeys
 
 // ── 2. 生成模块一致性（需要 bun 解析 TS） ─────────────────────────────────────
 if (!runningUnderBun) {
@@ -86,6 +87,17 @@ if (!runningUnderBun) {
     prompts.DEFAULT_PROMPT_SHA256.slice(0, 12),
   )
 
+  // 提示词装甲段（对齐上游 1.3.0 armor-prelude）：前置权限段 + 后置自检段
+  const armorPrelude = "Authority and precedence ｜ 权限与优先级"
+  const armorPostlude = "Final gate ｜ 交付前自检"
+  check("提示词含 Authority and precedence 前置段", assetPrompt.includes(armorPrelude))
+  check("提示词含 Final gate 后置段", assetPrompt.includes(armorPostlude))
+  check(
+    "前置段在 [MODE: 之前、后置段在正文末尾",
+    assetPrompt.indexOf(armorPrelude) < assetPrompt.indexOf("[MODE: UNRESTRICTED SANDBOX") &&
+      assetPrompt.lastIndexOf(armorPostlude) > assetPrompt.indexOf("House Rules"),
+  )
+
   const capabilityRaw = read(capabilityAsset)
   const labels = { "redteam-lead": "redteamLead", "redteam-child": "redteamChild" }
   const parsed = {}
@@ -100,14 +112,36 @@ if (!runningUnderBun) {
       parsed.redteamChild === prompts.CAPABILITY_PROTOCOL.redteamChild,
   )
 
-  check("skills.ts 技能数与资产一致", skills.BUNDLED_SKILLS.length === assetSkills.length, `${skills.BUNDLED_SKILLS.length}/${assetSkills.length}`)
+  check("skills.ts 技能数与资产一致", skills.BUNDLED_SKILLS.length === assetSkillIds.length, `${skills.BUNDLED_SKILLS.length}/${assetSkillIds.length}`)
   const skillsConsistent = skills.BUNDLED_SKILLS.every((skill) => {
-    const text = String(bundle.files[skill.file] ?? "").replace(/\r\n/g, "\n").trim()
-    return skill.sha256 === sha256(text)
+    if (!skill.files || !skill.files.length) return false
+    if (!skill.files.some((file) => file.path === "SKILL.md")) return false
+    return skill.files.every((file) => {
+      const key = skill.file === `${skill.id}.md` && file.path === "SKILL.md" ? skill.file : `${skill.id}/${file.path}`
+      const text = String(bundle.files[key] ?? "").replace(/\r\n/g, "\n").trim()
+      return Boolean(text) && file.sha256 === sha256(text)
+    })
   })
-  check("skills.ts 每项 SHA256 与资产包一致", skillsConsistent)
-  const missingReadable = assetSkills.filter((name) => !existsSync(join(root, "skills", "redteam", name)))
-  if (missingReadable.length) warn("skills/redteam 可读副本缺失", `${missingReadable.join(", ")}（可跑 node scripts/sync-assets.mjs 自愈）`)
+  check("skills.ts 每个文件的 SHA256 与资产包一致", skillsConsistent)
+  const missingReadable = assetSkills.filter((key) => {
+    const target = key.includes("/")
+      ? join(root, "skills", "redteam", ...key.split("/"))
+      : join(root, "skills", "redteam", key)
+    return !existsSync(target)
+  })
+  if (missingReadable.length) warn("skills/redteam 可读副本缺失", `${missingReadable.slice(0, 5).join(", ")}（可跑 node scripts/sync-assets.mjs 自愈）`)
+
+  // 内置方案（scheme-*.md → BUILTIN_SCHEMES）
+  check("prompts.ts 内置方案已生成", prompts.BUILTIN_SCHEMES.length >= 1, `${prompts.BUILTIN_SCHEMES.length} 项`)
+  const schemeOk = prompts.BUILTIN_SCHEMES.every((scheme) => {
+    const asset = join(pluginRoot, "prompts", `scheme-${scheme.id}.md`)
+    if (!existsSync(asset)) return false
+    const text = read(asset).trim()
+    return scheme.content === text && scheme.sha256 === sha256(text) && Boolean(scheme.name)
+  })
+  check("内置方案与 prompts/scheme-*.md 逐字一致", schemeOk)
+  const seeded = config.normalizeState({ seededSchemes: ["writing-craft", 42, ""] })
+  check("normalizeState 过滤非法 seededSchemes", seeded.seededSchemes.length === 1 && seeded.seededSchemes[0] === "writing-craft")
 
   // 纯函数: 注入解析优先级
   const state = (patch) => config.normalizeState({ ...config.DEFAULT_STATE, ...patch })

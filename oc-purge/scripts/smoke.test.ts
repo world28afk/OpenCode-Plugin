@@ -180,7 +180,7 @@ describe("oc-purge mount", () => {
   })
 
   test("purge_rules: save + use drives injection (one-click switching)", async () => {
-    const harness = makeContext()
+    const harness = makeContext({ seedSchemes: false })
     await mount(harness.ctx)
     const tool = harness.tools.find((item) => item.name === "purge_rules")!
     await tool.execute({ action: "save", id: "alpha", name: "Alpha", content: "RULE-ALPHA" })
@@ -215,7 +215,7 @@ describe("oc-purge mount", () => {
   })
 
   test("purge_rules: duplicate / rename / delete", async () => {
-    const harness = makeContext()
+    const harness = makeContext({ seedSchemes: false })
     await mount(harness.ctx)
     const tool = harness.tools.find((item) => item.name === "purge_rules")!
     await tool.execute({ action: "save", id: "a", name: "A", content: "AAA" })
@@ -227,6 +227,22 @@ describe("oc-purge mount", () => {
     await tool.execute({ action: "bind", kind: "model", key: "m", id: "b" })
     await tool.execute({ action: "delete", id: "b" })
     expect(readJson(await tool.execute({ action: "list" })).bindings.model.m).toBeUndefined()
+  })
+
+  test("内置方案：首次装载播种 writing-craft，删掉后不再重建", async () => {
+    const harness = makeContext()
+    await mount(harness.ctx)
+    const tool = harness.tools.find((item) => item.name === "purge_rules")!
+    const first = readJson(await tool.execute({ action: "list" }))
+    const ids = first.schemes.map((scheme: { id: string }) => scheme.id)
+    expect(ids).toContain("writing-craft")
+    expect(first.schemes.find((scheme: { id: string }) => scheme.id === "writing-craft").name.length).toBeGreaterThan(0)
+
+    await tool.execute({ action: "delete", id: "writing-craft" })
+    const second = makeContext({ initialState: harness.stored() })
+    await mount(second.ctx)
+    const after = readJson(await second.tools.find((item) => item.name === "purge_rules")!.execute({ action: "list" }))
+    expect(after.schemes.map((scheme: { id: string }) => scheme.id)).not.toContain("writing-craft")
   })
 
   test("purge_servers: normalization drops keys / ranges / wildcards", async () => {

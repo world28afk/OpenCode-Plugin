@@ -1,22 +1,23 @@
 # oc-purge
 
-**dsh-purge → OpenCode V2 插件移植版**（基线： [`YuJunZhiXue/dsh-purge`](https://github.com/YuJunZhiXue/dsh-purge) v1.1.71，MIT）
+**dsh-purge → OpenCode V2 插件移植版**（基线： [`YuJunZhiXue/dsh-purge`](https://github.com/YuJunZhiXue/dsh-purge) v1.1.71；当前维护线：[`HimLeoing/dsh-purge`](https://github.com/HimLeoing/dsh-purge) v1.6.1，MIT）
 
 把 DeepSeek Harness（DSH / Cordis）红队插件 **dsh-purge** 按
 [`oc-plugin`](../oc-plugin/docs/dsh-to-opencode-migration.md) 的迁移指南移植为 **OpenCode V2 插件**：
 逐模型可换提示词、多规则集、能力选用协议、捆绑红队技能，服务端注入 + TUI 状态条 + 桌面 dock。
 
-> ⚠️ 署名要求：本项目按上游 MIT 许可的二开要求，**保留作者署名与来源仓库**
-> [`YuJunZhiXue/dsh-purge`](https://github.com/YuJunZhiXue/dsh-purge)。
+> ⚠️ 署名要求：本项目按上游 MIT 许可的二开要求，**保留原作者署名与来源仓库**
+> **小杨 / [@YuJunZhiXue](https://github.com/YuJunZhiXue)**（[`YuJunZhiXue/dsh-purge`](https://github.com/YuJunZhiXue/dsh-purge)）。
 >
-> 许可分叉点：上游自 **v1.1.73** 起改为 Apache-2.0 + NOTICE + 商用条款。
-> 本项目代码基于 **v1.1.71（MIT）**，仍按 MIT 分发；若从 ≥ v1.1.73 引入代码，必须同时保留上游
-> `NOTICE` 与署名。
+> 许可沿革：原作者 v1.1.73 起曾改为 Apache-2.0 + NOTICE + 商用条款；自 **1.6.0** 起由
+> [`HimLeoing/dsh-purge`](https://github.com/HimLeoing/dsh-purge) 独立维护，**许可回到 MIT**，
+> 并删除了商用限制章节。本项目基于 v1.1.71（MIT）分发，从 1.6.x 引入的内容同样按 MIT 处理。
 
-> 🔀 上游自 **v1.1.73** 起转向「开源版 = 本地靶场 only」（私网 IP 门禁、删红队技能库、
+> 🔀 上游 v1.1.73 一度转向「开源版 = 本地靶场 only」（私网 IP 门禁、删红队技能库、
 > 禁止游戏外挂）。**本项目不跟随该限制**：保留全类别 Scoped Rules、23 项捆绑技能与
-> 无门禁设计。逐版本对照与分叉记录见
-> [`docs/comparison-with-upstream.md`](docs/comparison-with-upstream.md#6-上游-1173-分叉记录基线-v1171--上游-v1190)。
+> 无门禁设计。当前维护线仍保留区域/银行域名门禁（`agent/pre-step`），本项目同样不启用。
+> 逐版本对照与分叉记录见
+> [`docs/comparison-with-upstream.md`](docs/comparison-with-upstream.md#7-上游-16xhimleoing-维护线记录)。
 
 ---
 
@@ -28,8 +29,9 @@ oc-purge/
 │   ├── package.json                    # exports "." → src/index.ts；"./tui" → src/tui.tsx
 │   ├── index.ts                        # 目录解析兜底入口
 │   ├── prompts/
-│   │   ├── default-prompt-inject.md    # 上游加密默认提示词（解封后逐字保留）
-│   │   └── capability-protocol.md      # 能力选用协议（官方 / 红队 lead / 红队 executor）
+│   │   ├── default-prompt-inject.md    # 上游加密默认提示词（解封后逐字保留 + 本地增强段）
+│   │   ├── capability-protocol.md      # 能力选用协议（官方 / 红队 lead / 红队 executor）
+│   │   └── scheme-writing-craft.md     # 内置方案「写作模式」（首次装载播种，可删）
 │   └── src/
 │       ├── index.ts                    # 默认导出 { id, setup }
 │       ├── mount.ts                    # 挂载：注入 hook + 工具 + 命令 + RPC（能力探测降级）
@@ -43,13 +45,17 @@ oc-purge/
 │       ├── prompts.ts / skills.ts      # 由 scripts/sync-assets.mjs 生成的内联资产
 │       └── tui.tsx                     # TUI 状态条半体
 ├── skills/redteam/*.md                 # 上游捆绑红队技能（23 项，逐字保留，可读副本）
+├── skills/redteam/<id>/**              # 目录型技能（game-hacking / reverse-engineering + references/templates）
 ├── skills/redteam.bundle.json.gz       # 技能资产包（压缩, 权威来源; 防终端安全软件误删明文）
 ├── presets/redteam/*                   # 上游红队预设（逐字保留）
 ├── docs/drill-auth-legal.html          # 上游 Drill 授权与法律声明（逐字保留）
 ├── docs/comparison-with-upstream.md    # 与上游的界面/功能差异对照（含还原情况）
+├── docs/absorbed-assets.md             # 外部资产吸收记录（来源 / 保留 / 丢弃）
 ├── desktop/oc-purge-dock.js        # 桌面/Web DOM 注入（输入框上方「⚔ 破甲」+ 右侧面板）
 ├── scripts/
 │   ├── sync-assets.mjs                 # 资产 → 内联 TS 模块（prompts.ts / skills.ts）
+│   ├── bundle-skills.mjs               # 目录型技能 → redteam.bundle.json.gz（--check 可进 CI）
+│   ├── armor-prelude.mjs               # 提示词装甲两段（插入 / --revert / --check）
 │   ├── patch-desktop.mjs               # app.asar 注入工具（--dry-run/--unpatch/--restore）
 │   ├── apply-desktop.ps1               # 关闭 → 打补丁 → 重启
 │   ├── smoke.test.ts                   # 假 Context 端到端冒烟
@@ -148,9 +154,16 @@ POST /api/rpc/purge.status/servers     {"input":{"action":"set","text":"203.0.11
 ## 回归校验
 
 ```powershell
-bun scripts/verify.mjs        # 资产哈希/生成一致性/纯函数/静态挂点/包布局/语法构建/冒烟
+bun scripts/verify.mjs                  # 资产哈希/生成一致性/纯函数/静态挂点/包布局/语法构建/冒烟
 bun test scripts/smoke.test.ts
+node scripts/armor-prelude.mjs --check  # 提示词装甲两段是否在位
+node scripts/bundle-skills.mjs --check  # 目录型技能与资产包是否一致
 ```
+
+## 外部资产
+
+从外部收集的提示词与技能（越狱提示词、game-hacking / reverse-engineering 技能）如何取舍、
+落到哪里、丢了什么，见 [`docs/absorbed-assets.md`](docs/absorbed-assets.md)。
 
 ## 许可与署名
 
@@ -158,6 +171,6 @@ bun test scripts/smoke.test.ts
 - 本移植保留上游署名与来源仓库；默认提示词、能力协议、红队技能、红队预设、Drill 授权声明
   **逐字保留**并由 `scripts/verify.mjs` 做 SHA256 校验。
 - 红队技能以 `skills/redteam.bundle.json.gz` 为权威压缩资产（防终端安全软件误删明文 md）；
-  `node scripts/sync-assets.mjs` 会按需把 `skills/redteam/*.md` 还原并重新生成 `src/skills.ts`。
+  `node scripts/sync-assets.mjs` 会按需把 `skills/redteam/**` 还原并重新生成 `src/skills.ts`。
 - 红队技能中的上游第三方内容另见 `docs/redteam-upstream-LICENSE` / `docs/redteam-upstream-DISCLOSURE`。
 - 仅用于本地自有主机 / 离线靶标 / 已获书面授权的演练；不得用于非法用途。

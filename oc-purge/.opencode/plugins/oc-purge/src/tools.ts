@@ -222,8 +222,8 @@ export function buildTools(controller: PurgeController): ToolDefinition[] {
       name: "purge_skills",
       description:
         "Manage red-team skills (upstream /skills command). Actions: list | install | import | create | delete. " +
-        "'install' exports the bundled skills/redteam/*.md; 'import' takes a folder or zip path; " +
-        "'create' writes <id>/SKILL.md; 'delete' removes <id> from the skills directory.",
+        "'install' exports the bundled skills/redteam/** (directory skills bring their references/ and templates/ too); " +
+        "'import' takes a folder or zip path; 'create' writes <id>/SKILL.md; 'delete' removes <id> from the skills directory.",
       input: {
         type: "object",
         properties: {

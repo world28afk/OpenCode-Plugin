@@ -65,6 +65,8 @@ export interface PurgeState {
   readonly noticeAck: boolean
   /** 最近一次模型调用看到的模型（`provider/model`），用于面板显示与绑定校验。 */
   readonly lastModel: string | null
+  /** 已经播种过的内置方案 id（删掉后不再自动重建）。 */
+  readonly seededSchemes: readonly string[]
 }
 
 export const DEFAULT_STATE: PurgeState = {
@@ -81,6 +83,7 @@ export const DEFAULT_STATE: PurgeState = {
   cwdSelections: [],
   noticeAck: false,
   lastModel: null,
+  seededSchemes: [],
 }
 
 function asText(value: unknown): string | null {
@@ -159,6 +162,9 @@ export function normalizeState(raw: unknown): PurgeState {
     cwdSelections: normalizeSelections(input.cwdSelections),
     noticeAck: input.noticeAck === true,
     lastModel: typeof input.lastModel === "string" && input.lastModel.trim() ? input.lastModel.trim() : null,
+    seededSchemes: Array.isArray(input.seededSchemes)
+      ? input.seededSchemes.filter((id): id is string => typeof id === "string" && Boolean(id.trim())).map((id) => id.trim())
+      : [],
   }
 }
 

@@ -25,7 +25,6 @@
   const LS_BASE = "oc-purge:serverBase"
   const LS_THEME = "oc-purge:theme"
   const LS_NOTICE = "oc-purge:noticed"
-  const LS_DRILL = "oc-purge:drillAuthorized"
   const CHECK_MS = 20_000
   const RETRY_MS = 4_000
 
@@ -44,11 +43,11 @@
     editorFor: "",
     newId: "",
     newName: "",
+    newOpen: false,
     bindKind: "model",
     bindKey: "",
     bindScheme: "",
     importPath: "",
-    skillId: "",
     serverBase: "",
   }
   try {
@@ -371,6 +370,14 @@
   box-shadow:0 3px 8px rgba(0,0,0,.12),0 1px 1px rgba(0,0,0,.04)}
 .ocp-tab:active{transform:scale(.98)}
 .ocp-status{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0 0 12px}
+.ocp-stats{display:none;grid-template-columns:repeat(4,1fr);margin:0 0 12px;padding:9px 0;
+  border-radius:12px;background:var(--panel);box-shadow:0 0 0 .5px var(--line)}
+.ocp-stats.on{display:grid}
+.ocp-stat{display:flex;flex-direction:column;align-items:center;gap:1px;min-width:0;
+  border-left:.5px solid var(--line)}
+.ocp-stat:first-child{border-left:0}
+.ocp-stat b{font-size:17px;font-weight:600;letter-spacing:-.3px;line-height:1.2;font-variant-numeric:tabular-nums}
+.ocp-stat span{font-size:11px;color:var(--fg2);letter-spacing:-.02px;white-space:nowrap}
 .ocp-chip{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 9px;border:0;border-radius:11px;
   background:var(--fill2);color:var(--fg2);font-size:12px;letter-spacing:-.05px;white-space:nowrap}
 .ocp-chip.ok{background:color-mix(in srgb,var(--ok) 16%,transparent);color:var(--ok)}
@@ -502,7 +509,7 @@
     const activeId = p && p.activeScheme ? p.activeScheme.id : null
 
     // 快速操作
-    const quick = card("快速操作", "应用＝开注入；复原＝清空方案/手写文本与模型绑定，回落内置默认提示词。")
+    const quick = card("快速操作", "应用＝开注入；复原＝清空方案/手写文本与模型绑定，回落内置默认。")
     const qrow = el("div", "ocp-inline")
     qrow.append(
       button("应用", () => act("apply", {}, "已应用"), { primary: true }),
@@ -510,23 +517,6 @@
       button(enabled ? "停用注入" : "开启注入", () => act("set", { enabled: !enabled }, enabled ? "已停用" : "已开启")),
     )
     quick.append(qrow)
-    const seg = el("div", "ocp-inline", undefined)
-    seg.style.marginTop = "8px"
-    const policySeg = el("div", "ocp-seg")
-    for (const item of ["fallback", "strict", "always"]) {
-      const b = el("button", item === p?.policy ? "on" : "", item)
-      b.type = "button"
-      b.title = { fallback: "有用户文本用用户文本，否则内置默认", strict: "只用用户文本", always: "用户文本后再追加内置默认" }[item]
-      b.addEventListener("click", () => act("set", { policy: item }, `策略：${item}`))
-      policySeg.append(b)
-    }
-    seg.append(policySeg)
-    const capOn = !(p && p.capabilityProtocol === false)
-    const capSwitch = el("span", `ocp-switch ${capOn ? "on" : ""}`)
-    capSwitch.append(el("i"), el("span", "", "能力协议"))
-    capSwitch.addEventListener("click", () => act("set", { capabilityProtocol: !capOn }, "能力协议已切换"))
-    seg.append(capSwitch)
-    quick.append(seg)
     body.append(quick)
 
     // 提示词方案（一键切换）
@@ -551,7 +541,7 @@
     )
     pinned.append(pmain, pops)
     schemesCard.append(pinned)
-    if (!schemes.length) schemesCard.append(el("div", "ocp-muted", "还没有自定义方案。点上面「复制为方案」可把内置默认存成可编辑方案；再「另存为方案」即可做多套（按模型切换）。"))
+    if (!schemes.length) schemesCard.append(el("div", "ocp-muted", "还没有自定义方案。用上面的「复制为方案」把内置默认存成可编辑方案。"))
     for (const s of schemes) {
       const row = el("div", `ocp-row ${s.id === activeId ? "on" : ""}`)
       const main = el("div", "ocp-row-main")
@@ -564,40 +554,48 @@
         button("编辑", () => {
           void act("rules", { action: "use", id: s.id }, `编辑中：${s.id}`)
         }, { sm: true }),
-        button("复制", () => {
-          const newId = `${s.id}-copy`
-          void act("rules", { action: "duplicate", id: s.id, newId }, `已复制为 ${newId}`)
-        }, { sm: true }),
         button("删除", () => act("rules", { action: "delete", id: s.id }, `已删除 ${s.id}`), { sm: true, danger: true }),
       )
       row.append(main, ops)
       schemesCard.append(row)
     }
-    // 另存为 / 新建
-    const saveRow = el("div", "ocp-inline")
-    saveRow.style.marginTop = "8px"
-    saveRow.append(
-      field("newId", input("新方案 id（kebab-case）", ui.newId, (v) => (ui.newId = v))),
-      field("newName", input("显示名（可选）", ui.newName, (v) => (ui.newName = v))),
-    )
-    const saveOps = el("div", "ocp-inline")
-    saveOps.style.marginTop = "6px"
-    saveOps.append(
-      button("另存为方案", () => {
-        const id = (ui.newId || "").trim()
-        if (!id) return toast("请填写方案 id", "warn"), renderNow()
-        void act("rules", { action: "save", id, name: (ui.newName || id).trim(), content: ui.editor }, `已保存并切换：${id}`).then(() =>
-          act("rules", { action: "use", id }, `已切换到 ${id}`),
-        )
-      }, { primary: true }),
-      button("新建空方案", () => {
-        const id = (ui.newId || "").trim()
-        if (!id) return toast("请填写方案 id", "warn"), renderNow()
-        void act("rules", { action: "save", id, name: (ui.newName || id).trim(), content: "" }, `已新建：${id}`)
-      }),
-      button("恢复内置默认", () => act("rules", { action: "reset" }, "已清除启用方案")),
-    )
-    schemesCard.append(saveRow, saveOps)
+    // 另存为 / 新建（默认收起，点「＋ 另存为方案」再展开）
+    if (!ui.newOpen) {
+      const addRow = el("div", "ocp-inline")
+      addRow.style.marginTop = "8px"
+      addRow.append(
+        button("＋ 另存为方案", () => {
+          ui.newOpen = true
+          signature = ""
+          renderNow()
+        }, { sm: true }),
+      )
+      schemesCard.append(addRow)
+    } else {
+      const saveRow = el("div", "ocp-inline")
+      saveRow.style.marginTop = "8px"
+      saveRow.append(
+        field("newId", input("新方案 id（kebab-case）", ui.newId, (v) => (ui.newId = v))),
+        field("newName", input("显示名（可选）", ui.newName, (v) => (ui.newName = v))),
+      )
+      const saveOps = el("div", "ocp-inline")
+      saveOps.style.marginTop = "6px"
+      saveOps.append(
+        button("保存并切换", () => {
+          const id = (ui.newId || "").trim()
+          if (!id) return toast("请填写方案 id", "warn"), renderNow()
+          void act("rules", { action: "save", id, name: (ui.newName || id).trim(), content: ui.editor }, `已保存并切换：${id}`).then(() =>
+            act("rules", { action: "use", id }, `已切换到 ${id}`),
+          )
+        }, { primary: true }),
+        button("取消", () => {
+          ui.newOpen = false
+          signature = ""
+          renderNow()
+        }),
+      )
+      schemesCard.append(saveRow, saveOps)
+    }
     body.append(schemesCard)
 
     // 提示词内容
@@ -629,129 +627,9 @@
         renderNow()
         toast("已载入内置默认到编辑框（保存即写入手写文本）", "ok")
       }),
-      button("清空", () => {
-        ui.editor = ""
-        signature = ""
-        renderNow()
-      }),
     )
     editorCard.append(area, meter, editorOps)
     body.append(editorCard)
-
-    // 模型绑定
-    const bindCard = card("模型绑定（不同模型用不同方案）", "匹配顺序：provider/model → model → agent。当前模型：" + (p?.lastModel || "未检测到（发一条消息后再看）") + "。")
-    const bindings = p && p.bindings ? p.bindings : { model: {}, agent: {} }
-    const entries = [...Object.entries(bindings.model || {}).map(([k, v]) => ({ kind: "model", key: k, scheme: v })), ...Object.entries(bindings.agent || {}).map(([k, v]) => ({ kind: "agent", key: k, scheme: v }))]
-    if (!entries.length) bindCard.append(el("div", "ocp-muted", "暂无绑定。"))
-    for (const item of entries) {
-      const row = el("div", "ocp-row")
-      const main = el("div", "ocp-row-main")
-      const label = item.scheme === "__default__" ? "内置默认" : `方案 ${item.scheme}`
-      main.append(el("b", "", `${item.key}`), el("span", "", `${item.kind} → ${label}`))
-      const ops = el("div", "ocp-ops")
-      ops.append(button("解绑", () => act("rules", { action: "unbind", kind: item.kind, key: item.key }, "已解绑"), { sm: true, danger: true }))
-      row.append(main, ops)
-      bindCard.append(row)
-    }
-    const bindRow = el("div", "ocp-inline")
-    bindRow.style.marginTop = "8px"
-    const kindSel = el("select", "ocp-input")
-    kindSel.style.width = "92px"
-    for (const k of ["model", "agent"]) {
-      const opt = el("option", "", k)
-      opt.value = k
-      if (ui.bindKind === k) opt.selected = true
-      kindSel.append(opt)
-    }
-    kindSel.addEventListener("change", () => (ui.bindKind = kindSel.value))
-    bindRow.append(kindSel, field("bindKey", input(ui.bindKind === "model" ? "provider/model 或 model" : "agent id", ui.bindKey, (v) => (ui.bindKey = v))))
-    const schemeSel = el("select", "ocp-input")
-    schemeSel.style.maxWidth = "150px"
-    const options = [{ id: "__default__", name: "内置默认" }, ...schemes]
-    for (const s of options) {
-      const opt = el("option", "", `${s.name || s.id}`)
-      opt.value = s.id
-      if (ui.bindScheme === s.id) opt.selected = true
-      schemeSel.append(opt)
-    }
-    schemeSel.addEventListener("change", () => (ui.bindScheme = schemeSel.value))
-    bindRow.append(schemeSel)
-    bindCard.append(bindRow)
-    bindCard.append(
-      button("绑定", () => {
-        const key = (ui.bindKey || "").trim()
-        const scheme = ui.bindScheme || "__default__"
-        if (!key) return toast("请填写匹配键", "warn"), renderNow()
-        void act("rules", { action: "bind", kind: ui.bindKind, key, id: scheme }, `已绑定 ${key} → ${scheme === "__default__" ? "内置默认" : scheme}`)
-      }, { primary: true }),
-    )
-    bindCard.append(el("div", "ocp-muted", "提示：可直接绑定「内置默认」；要按模型用不同自定义提示词，先在「提示词方案」里创建方案再绑定。匹配键形如 ds/deepseek-v4-pro 或 deepseek-flash。"))
-    body.append(bindCard)
-
-    // 自己的服务器
-    const own = card("自己的服务器（白名单）", "每行一个 IP 或完整主机名；可写 user@host；密钥/口令/网段/通配符自动丢弃。")
-    const serversArea = field("servers", el("textarea", "ocp-area"))
-    serversArea.style.minHeight = "72px"
-    serversArea.value = (p?.servers?.hosts || []).join("\n")
-    serversArea.addEventListener("input", () => (ui.editorServers = serversArea.value))
-    const ownOps = el("div", "ocp-inline")
-    ownOps.style.marginTop = "6px"
-    ownOps.append(button("保存列表", () => act("servers", { action: "set", text: serversArea.value }, "白名单已保存"), { primary: true }), el("span", "ocp-muted", `当前 ${(p?.servers?.hosts || []).length} 台`))
-    own.append(serversArea, ownOps)
-    body.append(own)
-
-    // 本地规则
-    const cwd = card("本地规则（当前目录 / 祖先）", "扫描 AGENTS.md / CLAUDE.md；勾选后，当没有任何方案/手写文本时作为注入来源。")
-    const cwdOps = el("div", "ocp-inline")
-    cwdOps.append(
-      button("重新扫描", () => rescanCwd(cwd)),
-      button("全部取消", () => act("set", { cwdSelections: [] }, "已取消全部勾选")),
-      el("span", "ocp-muted", `已选 ${(p?.cwd?.selections || []).length}`),
-    )
-    cwd.append(cwdOps)
-    const cwdList = el("div", "")
-    cwdList.setAttribute(`${MARK}-cwd`, "")
-    cwd.append(cwdList)
-    fillCwd(cwdList)
-    body.append(cwd)
-
-    // 技能
-    const skills = card("技能（Skill）", "内置＝随插件捆绑；导出/导入到 OpenCode 技能目录（.opencode/skills/<id>/SKILL.md）。")
-    skills.append(el("div", "ocp-muted", `内置 ${p?.skills?.bundled ?? 0} · 已装 ${(p?.skills?.installed || []).length}`))
-    const skOps = el("div", "ocp-inline")
-    skOps.style.marginTop = "6px"
-    skOps.append(button("导出全部内置", () => act("skills", { action: "install" }, "已导出内置技能")))
-    const importRow = el("div", "ocp-inline")
-    importRow.style.marginTop = "6px"
-    importRow.append(field("importPath", input("文件夹或 .zip 路径", ui.importPath, (v) => (ui.importPath = v))), button("导入", () => act("skills", { action: "import", path: (ui.importPath || "").trim() }, "已导入技能")))
-    const createRow = el("div", "ocp-inline")
-    createRow.style.marginTop = "6px"
-    createRow.append(field("skillId", input("新建技能 id（kebab-case）", ui.skillId, (v) => (ui.skillId = v))), button("新建", () => act("skills", { action: "create", id: (ui.skillId || "").trim() }, "已新建技能")))
-    skills.append(skOps, importRow, createRow)
-    if ((p?.skills?.installed || []).length) skills.append(el("div", "ocp-muted", "已装：" + (p.skills.installed || []).join(", ")))
-    body.append(skills)
-
-    // 连接
-    const conn = card("连接", "插件自包含探测；失败可手填（如 http://127.0.0.1:49374）。RPC 会自动带上当前会话位置。")
-    conn.append(
-      kv("本实例位置", (p && p.directory) || "未知"),
-      kv("捕获到的会话位置", currentLocation() || "未捕获（将回退默认实例）"),
-      kv("模型注册表", `${Object.keys((p && p.modelsByDirectory) || {}).length} 条`),
-    )
-    const connRow = el("div", "ocp-inline")
-    connRow.append(
-      field("serverBase", input("http://127.0.0.1:49374", ui.serverBase, (v) => (ui.serverBase = v))),
-      button("连接", () => {
-        try {
-          if ((ui.serverBase || "").trim()) localStorage.setItem(LS_BASE, stripBase(ui.serverBase.trim()))
-          else localStorage.removeItem(LS_BASE)
-        } catch {}
-        basePromise = null
-        void refresh().then(() => toast("已按新地址重连", "ok"))
-      }),
-    )
-    conn.append(connRow)
-    body.append(conn)
   }
 
   function fillCwd(node) {
@@ -802,64 +680,143 @@
     }
   }
 
-  // ── Drill 页 ─────────────────────────────────────────────────────────────
-  const DRILL_NOTICE = [
-    "演练台（Drill）仅限：你管理的主机、离线靶标、或已获书面授权的演练。",
-    "未经授权的入侵、攻击、窃取或破坏一律禁止。",
-    "授权只存于本机浏览器；关闭面板不会撤销。",
-  ]
-
+  // ── 高级页（设置一次的东西都在这里，常用页只留日常动作） ────────────────
   function renderDrill(body) {
-    let authorized = false
-    try {
-      authorized = localStorage.getItem(LS_DRILL) === "1"
-    } catch {}
-    if (!authorized) {
-      const gate = card("演练台授权", "首次进入 Drill 需确认以下条款（Clean 页不需要）。")
-      for (const line of DRILL_NOTICE) gate.append(el("div", "ocp-muted", "• " + line))
-      const boxes = []
-      for (const text of ["我已阅读安全与反滥用告知，并接受全部条款。", "我只在已授权主机 / 离线靶标 / 合规演练中使用。", "我不会将其用于任何非法用途。"]) {
-        const wrap = el("label", "ocp-gate")
-        const box = document.createElement("input")
-        box.type = "checkbox"
-        boxes.push(box)
-        wrap.append(box, el("span", "", text))
-        gate.append(wrap)
-      }
-      gate.append(
-        button("确认授权并打开 Drill", () => {
-          if (!boxes.every((b) => b.checked)) {
-            toast("请勾选全部三项", "warn")
-            return renderNow()
-          }
-          try {
-            localStorage.setItem(LS_DRILL, "1")
-          } catch {}
-          toast("已授权", "ok")
-          signature = ""
-          renderNow()
-        }, { primary: true }),
-      )
-      body.append(gate)
-      return
-    }
     const p = state.profile
-    const info = card("演练台 · 资源", "OpenCode 无 DSH 的演练台事实库 / 报告回放接口；此处保留技能资产、靶标白名单与授权声明。")
-    info.append(
-      kv("内置红队技能", p?.skills?.bundled ?? 0),
-      kv("已装技能", (p?.skills?.installed || []).length),
-      kv("靶标白名单", `${(p?.servers?.hosts || []).length} 台`),
-      kv("上游 Drill 授权声明", "docs/drill-auth-legal.html"),
-      kv("插件版本", p?.pluginVersion ?? VERSION),
+    const schemes = p && Array.isArray(p.schemes) ? p.schemes : []
+
+    // 策略与能力协议
+    const policy = card("注入策略", "fallback：有用户文本用文本，否则内置默认；strict：只用用户文本；always：用户文本后再追加内置默认。")
+    const policyRow = el("div", "ocp-inline")
+    const policySeg = el("div", "ocp-seg")
+    for (const item of ["fallback", "strict", "always"]) {
+      const b = el("button", item === p?.policy ? "on" : "", item)
+      b.type = "button"
+      b.title = { fallback: "有用户文本用用户文本，否则内置默认", strict: "只用用户文本", always: "用户文本后再追加内置默认" }[item]
+      b.addEventListener("click", () => act("set", { policy: item }, `策略：${item}`))
+      policySeg.append(b)
+    }
+    const capOn = !(p && p.capabilityProtocol === false)
+    const capSwitch = el("span", `ocp-switch ${capOn ? "on" : ""}`)
+    capSwitch.append(el("i"), el("span", "", "能力协议"))
+    capSwitch.addEventListener("click", () => act("set", { capabilityProtocol: !capOn }, "能力协议已切换"))
+    policyRow.append(policySeg, capSwitch)
+    policy.append(policyRow)
+    body.append(policy)
+
+    // 模型绑定
+    const bindCard = card("模型绑定", "匹配顺序：provider/model → model → agent。当前模型：" + (p?.lastModel || "未检测到（发一条消息后再看）") + "。")
+    const bindings = p && p.bindings ? p.bindings : { model: {}, agent: {} }
+    const entries = [...Object.entries(bindings.model || {}).map(([k, v]) => ({ kind: "model", key: k, scheme: v })), ...Object.entries(bindings.agent || {}).map(([k, v]) => ({ kind: "agent", key: k, scheme: v }))]
+    if (!entries.length) bindCard.append(el("div", "ocp-muted", "暂无绑定。"))
+    for (const item of entries) {
+      const row = el("div", "ocp-row")
+      const main = el("div", "ocp-row-main")
+      const label = item.scheme === "__default__" ? "内置默认" : `方案 ${item.scheme}`
+      main.append(el("b", "", `${item.key}`), el("span", "", `${item.kind} → ${label}`))
+      const ops = el("div", "ocp-ops")
+      ops.append(button("解绑", () => act("rules", { action: "unbind", kind: item.kind, key: item.key }, "已解绑"), { sm: true, danger: true }))
+      row.append(main, ops)
+      bindCard.append(row)
+    }
+    const bindRow = el("div", "ocp-inline")
+    bindRow.style.marginTop = "8px"
+    const kindSel = el("select", "ocp-input")
+    kindSel.style.width = "92px"
+    for (const k of ["model", "agent"]) {
+      const opt = el("option", "", k)
+      opt.value = k
+      if (ui.bindKind === k) opt.selected = true
+      kindSel.append(opt)
+    }
+    kindSel.addEventListener("change", () => (ui.bindKind = kindSel.value))
+    bindRow.append(kindSel, field("bindKey", input(ui.bindKind === "model" ? "provider/model 或 model" : "agent id", ui.bindKey, (v) => (ui.bindKey = v))))
+    const schemeSel = el("select", "ocp-input")
+    schemeSel.style.maxWidth = "150px"
+    const options = [{ id: "__default__", name: "内置默认" }, ...schemes]
+    for (const s of options) {
+      const opt = el("option", "", `${s.name || s.id}`)
+      opt.value = s.id
+      if (ui.bindScheme === s.id) opt.selected = true
+      schemeSel.append(opt)
+    }
+    schemeSel.addEventListener("change", () => (ui.bindScheme = schemeSel.value))
+    bindRow.append(schemeSel)
+    bindCard.append(bindRow)
+    bindCard.append(
+      button("绑定", () => {
+        const key = (ui.bindKey || "").trim()
+        const scheme = ui.bindScheme || "__default__"
+        if (!key) return toast("请填写匹配键", "warn"), renderNow()
+        void act("rules", { action: "bind", kind: ui.bindKind, key, id: scheme }, `已绑定 ${key} → ${scheme === "__default__" ? "内置默认" : scheme}`)
+      }, { primary: true }),
     )
-    if ((p?.skills?.ids || []).length) info.append(el("div", "ocp-muted", "技能：" + p.skills.ids.join(", ")))
-    body.append(info)
+    body.append(bindCard)
+
+    // 自己的服务器
+    const own = card("自己的服务器（白名单）", "每行一个 IP 或完整主机名；可写 user@host；密钥/口令/网段/通配符自动丢弃。")
+    const serversArea = field("servers", el("textarea", "ocp-area"))
+    serversArea.style.minHeight = "72px"
+    serversArea.value = (p?.servers?.hosts || []).join("\n")
+    serversArea.addEventListener("input", () => (ui.editorServers = serversArea.value))
+    const ownOps = el("div", "ocp-inline")
+    ownOps.style.marginTop = "6px"
+    ownOps.append(button("保存列表", () => act("servers", { action: "set", text: serversArea.value }, "白名单已保存"), { primary: true }), el("span", "ocp-muted", `当前 ${(p?.servers?.hosts || []).length} 台`))
+    own.append(serversArea, ownOps)
+    body.append(own)
+
+    // 本地规则
+    const cwd = card("本地规则（当前目录 / 祖先）", "扫描 AGENTS.md / CLAUDE.md；勾选后，当没有任何方案/手写文本时作为注入来源。")
+    const cwdOps = el("div", "ocp-inline")
+    cwdOps.append(
+      button("重新扫描", () => rescanCwd(cwd)),
+      button("全部取消", () => act("set", { cwdSelections: [] }, "已取消全部勾选")),
+      el("span", "ocp-muted", `已选 ${(p?.cwd?.selections || []).length}`),
+    )
+    cwd.append(cwdOps)
+    const cwdList = el("div", "")
+    cwdList.setAttribute(`${MARK}-cwd`, "")
+    cwd.append(cwdList)
+    fillCwd(cwdList)
+    body.append(cwd)
+
+    // 技能
+    const skills = card("技能（Skill）", "内置＝随插件捆绑；导出到 .opencode/skills/<id>/（目录型技能带 references/）。")
+    skills.append(el("div", "ocp-muted", `内置 ${p?.skills?.bundled ?? 0} · 已装 ${(p?.skills?.installed || []).length}`))
+    const skOps = el("div", "ocp-inline")
+    skOps.style.marginTop = "6px"
+    skOps.append(button("导出全部内置", () => act("skills", { action: "install" }, "已导出内置技能")))
+    const importRow = el("div", "ocp-inline")
+    importRow.style.marginTop = "6px"
+    importRow.append(field("importPath", input("文件夹或 .zip 路径", ui.importPath, (v) => (ui.importPath = v))), button("导入", () => act("skills", { action: "import", path: (ui.importPath || "").trim() }, "已导入技能")))
+    skills.append(skOps, importRow)
+    if ((p?.skills?.installed || []).length) skills.append(el("div", "ocp-muted", "已装：" + (p.skills.installed || []).join(", ")))
+    body.append(skills)
+
+    // 连接
+    const conn = card("连接", "插件自包含探测；自动探测失败时手填服务地址（如 http://127.0.0.1:49374）。")
+    conn.append(kv("本实例位置", (p && p.directory) || "未知"))
+    const connRow = el("div", "ocp-inline")
+    connRow.append(
+      field("serverBase", input("http://127.0.0.1:49374", ui.serverBase, (v) => (ui.serverBase = v))),
+      button("连接", () => {
+        try {
+          if ((ui.serverBase || "").trim()) localStorage.setItem(LS_BASE, stripBase(ui.serverBase.trim()))
+          else localStorage.removeItem(LS_BASE)
+        } catch {}
+        basePromise = null
+        void refresh().then(() => toast("已按新地址重连", "ok"))
+      }),
+    )
+    conn.append(connRow)
+    body.append(conn)
   }
 
   // ── 面板骨架 ─────────────────────────────────────────────────────────────
   let panel = null
   let bodyNode = null
   let statusNode = null
+  let statsNode = null
   let toastNode = null
   let tabsNode = null
   let signature = ""
@@ -926,7 +883,7 @@
 
     const tabs = el("div", "ocp-tabs")
     tabsNode = tabs
-    for (const [id, label] of [["clean", "Clean"], ["drill", "Drill"]]) {
+    for (const [id, label] of [["clean", "常用"], ["drill", "高级"]]) {
       const t = el("button", `ocp-tab ${state.tab === id ? "on" : ""}`, label)
       t.type = "button"
       t.dataset.tab = id
@@ -941,7 +898,8 @@
     root.append(tabs)
 
     statusNode = el("div", "ocp-status")
-    root.append(statusNode)
+    statsNode = el("div", "ocp-stats")
+    root.append(statusNode, statsNode)
 
     bodyNode = el("div", "")
     root.append(bodyNode)
@@ -989,6 +947,7 @@
       statusNode.append(modelChip)
     }
     if (state.busy) statusNode.append(chip("处理中…", "warn"))
+    paintStats(running)
     if (toastNode) {
       toastNode.textContent = state.toast ? state.toast.message : state.error && state.phase !== "running" ? state.error : ""
       toastNode.style.color = state.toast
@@ -1008,6 +967,31 @@
           ? "正在连接服务…"
           : "未连接服务"
     }
+  }
+
+  // 统计条：技能 / 白名单 / 本地规则 / 绑定（对齐上游 1.3.0「指标收成一条统计带」）
+  function paintStats(running) {
+    if (!statsNode) return
+    const p = running ? state.profile : null
+    const on = Boolean(p)
+    statsNode.classList.toggle("on", on)
+    if (!on) {
+      statsNode.replaceChildren()
+      return
+    }
+    const cells = [
+      [String(p.skills?.installed?.length ?? 0), "技能"],
+      [String(p.servers?.hosts?.length ?? 0), "白名单"],
+      [String(p.cwd?.selections?.length ?? 0), "本地规则"],
+      [String(Object.keys(p.bindings ?? {}).length), "绑定"],
+    ]
+    statsNode.replaceChildren(
+      ...cells.map(([value, label]) => {
+        const cell = el("div", "ocp-stat")
+        cell.append(el("b", "", value), el("span", "", label))
+        return cell
+      }),
+    )
   }
 
   function focusSnapshot() {
@@ -1054,7 +1038,7 @@
       if (panel) {
         panel.remove()
         panel = null
-        bodyNode = statusNode = toastNode = null
+        bodyNode = statusNode = statsNode = toastNode = null
         tabsNode = null
         signature = ""
       }
@@ -1136,7 +1120,7 @@
     c.append(
       el("h4", "", "使用告知"),
       el("p", "", "oc-purge 是 dsh-purge 的 OpenCode 移植：本地自有主机上的提示词 / 方案 / 技能管理与红队评测。免费非商业，保留上游署名。"),
-      el("p", "", "来源：https://github.com/YuJunZhiXue/dsh-purge"),
+      el("p", "", "来源：https://github.com/HimLeoing/dsh-purge（原作者：YuJunZhiXue/dsh-purge）"),
       el("p", "", "不得用于未授权攻击、入侵、数据窃取或破坏；不得商业倒卖。"),
     )
     const ack = el("label", "ocp-gate")
@@ -1218,11 +1202,11 @@
       const style = document.getElementById(STYLE_ID)
       if (style) style.remove()
       panel = null
-      bodyNode = statusNode = toastNode = null
+      bodyNode = statusNode = statsNode = toastNode = null
       delete window.ocPurgeDock
       delete window.__ocPurgeDock
     },
   }
 
-  console.info(`[oc-purge] v${VERSION} dock 已注入（输入框上方「破甲」按钮；Clean / Drill 双页）。`)
+  console.info(`[oc-purge] v${VERSION} dock 已注入（输入框上方「破甲」按钮；常用 / 高级 双页）。`)
 })()

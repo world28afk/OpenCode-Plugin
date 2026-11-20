@@ -3,7 +3,7 @@
 
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { basename, join, resolve } from "node:path"
+import { basename, dirname, join, resolve } from "node:path"
 import { spawnSync } from "node:child_process"
 
 import type { Plugin } from "@opencode/plugin"
@@ -21,7 +21,7 @@ import { buildProfile } from "./profile"
 import { PurgeStatus } from "./rpc"
 import { buildTools, type PurgeController } from "./tools"
 import { readSelectedCwdInject, scanCwdInstructions } from "./workspace"
-import { DEFAULT_PROMPT } from "./prompts"
+import { DEFAULT_PROMPT, BUILTIN_SCHEMES } from "./prompts"
 
 export const PLUGIN_ID = "oc-purge"
 export const PLUGIN_VERSION = "1.1.71"
@@ -143,7 +143,10 @@ function writeModelRegistry(registry: Record<string, ModelEntry>): void {
 
 function skillDoc(id: string, description: string, body: string): string {
   const desc = (description || id).replace(/\s+/g, " ").trim()
-  const inner = String(body || "").replace(/^\uFEFF/, "").replace(/^\s*\n/, "")
+  const inner = String(body || "")
+    .replace(/^\uFEFF/, "")
+    .replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "")
+    .replace(/^\s*\n/, "")
   return `---\nname: ${id}\ndescription: ${JSON.stringify(desc)}\n---\n\n${inner}`
 }
 
@@ -184,6 +187,7 @@ export async function mount(ctx: Plugin.Context): Promise<Cleanup> {
   const redteam = options.redteam === true
   const redteamChild = options.redteamChild === true
   const preserveChatml = options.preserveChatml === true
+  const seedSchemes = options.seedSchemes !== false
 
   // ── 状态装载（ctx.storage 优先, 否则内存默认） ──────────────────────────
   let state: PurgeState = DEFAULT_STATE
@@ -202,6 +206,23 @@ export async function mount(ctx: Plugin.Context): Promise<Cleanup> {
       await (ctx.storage as { set: (key: string, value: unknown) => Promise<void> }).set(STORAGE_KEY, state)
     } catch (error) {
       console.warn("[oc-purge] state persist failed:", message(error))
+    }
+  }
+
+  // ── 内置方案播种（每个 id 只播种一次；用户删掉后不再自动重建） ───────────
+  if (seedSchemes && BUILTIN_SCHEMES.length) {
+    const seeded = new Set(state.seededSchemes)
+    const missing = BUILTIN_SCHEMES.filter((scheme) => !seeded.has(scheme.id))
+    if (missing.length) {
+      const rules = [...state.rules]
+      for (const scheme of missing) {
+        if (!rules.some((rule) => rule.id === scheme.id)) {
+          rules.push({ id: scheme.id, name: scheme.name, content: scheme.content, updatedAt: Date.now() })
+        }
+        seeded.add(scheme.id)
+      }
+      state = normalizeState({ ...state, rules, seededSchemes: [...seeded] })
+      await persist()
     }
   }
 
@@ -312,7 +333,17 @@ export async function mount(ctx: Plugin.Context): Promise<Cleanup> {
         const folder = join(dir, skill.id)
         try {
           if (!existsSync(folder)) mkdirSync(folder, { recursive: true })
-          writeFileSync(join(folder, SKILL_ENTRY), skillDoc(skill.id, skill.description, skill.content), "utf8")
+          // 目录型技能：主文档重新生成 frontmatter，其余文件（references/、templates/）原样落盘。
+          for (const file of skill.files) {
+            const target = join(folder, ...file.path.split("/"))
+            if (file.path === SKILL_ENTRY) {
+              writeFileSync(target, skillDoc(skill.id, skill.description, file.content), "utf8")
+              continue
+            }
+            const parent = dirname(target)
+            if (!existsSync(parent)) mkdirSync(parent, { recursive: true })
+            writeFileSync(target, file.content, "utf8")
+          }
           installed.push(skill.id)
         } catch (error) {
           console.warn(`[oc-purge] skill install failed (${skill.id}):`, message(error))
